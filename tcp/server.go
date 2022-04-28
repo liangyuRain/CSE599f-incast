@@ -7,12 +7,13 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
 func main() {
 	var host = flag.String("host", "localhost", "Host IP")
-	var port = flag.String("port", "9369", "Port")
+	var port = flag.String("port", "9000", "Port")
 	flag.Parse()
 	addr := *host + ":" + *port
 	fmt.Printf("Listening to %s\n", addr)
@@ -37,12 +38,21 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	clientReader := bufio.NewReader(conn)
 	for {
-		clientRequest, err := clientReader.ReadString('\n')
+		request, err := clientReader.ReadString('\n')
 		switch err {
 		case nil:
-			clientRequest = strings.TrimSuffix(clientRequest, "\n")
-			fmt.Printf("Client request: %s\n", clientRequest)
-			conn.Write([]byte("Hello World~"))
+			request = strings.TrimSuffix(request, "\n")
+			fmt.Printf("Client request: %s\n", request)
+			args := strings.Fields(request)
+			delay, size := 0, 0
+			if len(args) > 0 {
+				delay, _ = strconv.Atoi(args[0])
+			}
+			if len(args) > 1 {
+				size, _ = strconv.Atoi(args[1])
+			}
+			reply := fmt.Sprintf("Reply delay=%d size=%d\n", delay, size)
+			conn.Write([]byte(reply))
 		case io.EOF:
 			fmt.Println("Client closed the connection")
 			return

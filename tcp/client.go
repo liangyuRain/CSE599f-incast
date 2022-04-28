@@ -12,7 +12,7 @@ import (
 
 func main() {
 	var host = flag.String("host", "localhost", "Host IP")
-	var port = flag.String("port", "9369", "Port")
+	var port = flag.String("port", "9000", "Port")
 	flag.Parse()
 	dest := *host + ":" + *port
 	fmt.Printf("Connecting to %s\n", dest)
@@ -26,11 +26,11 @@ func main() {
 	serverReader := bufio.NewReader(conn)
 
 	for {
-		clientRequest, err := clientReader.ReadString('\n')
+		request, err := clientReader.ReadString('\n')
 		switch err {
 		case nil:
-			clientRequest = strings.TrimSuffix(clientRequest, "\n")
-			conn.Write([]byte(clientRequest + "\n"))
+			request = strings.TrimSuffix(request, "\n")
+			conn.Write([]byte(request + "\n"))
 		case io.EOF:
 			fmt.Println("Client closed the connection")
 			return
@@ -39,10 +39,11 @@ func main() {
 			return
 		}
 
-		serverReply, err := serverReader.ReadString('~')
+		reply, err := serverReader.ReadString('\n')
 		switch err {
 		case nil:
-			fmt.Printf("Server reply: %s\n", serverReply)
+			reply = strings.TrimSuffix(reply, "\n")
+			fmt.Printf("Server reply: %s\n", reply)
 		case io.EOF:
 			fmt.Println("Server closed the connection")
 			return
