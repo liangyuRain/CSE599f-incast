@@ -58,17 +58,15 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6 *) sa)->sin6_addr);
 }
 
-struct rpc_result {
-    struct timespec send_timestamp, comp_timestamp;
-    size_t num_bytes_recv;
-};
-
 struct rpc_argv {
     pthread_t thread_id;
     size_t thread_num;
     char *ip_addr, *port;
     size_t delay, fileSize;
-    struct rpc_result result;
+    struct rpc_result {
+        struct timespec send_timestamp, comp_timestamp;
+        size_t num_bytes_recv;
+    } result;
 };
 
 void* virtual_rpc(void *argv) {
@@ -190,7 +188,7 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < serverCount; ++i) {
         unsigned int sleepTime = launchInterval;
-        while(sleepTime) {
+        while(sleepTime > 0) {
             sleepTime = sleep(sleepTime);
         }
 
