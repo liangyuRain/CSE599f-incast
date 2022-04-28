@@ -1,6 +1,7 @@
 #include <time.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 #define SEC_TO_NS 1000000000
 #define TIME_UTC_TO_PST (-7 * 3600)

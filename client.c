@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include <stdbool.h>
 #include <unistd.h>
 #include <errno.h>
 #include <pthread.h>
@@ -113,7 +112,7 @@ void* virtual_rpc(void *argv) {
     // send msg to backend server
     // char msg[] = "/homes/gws/liangyu/CSE550-HW/HW1/partb/test.txt\n";
     char msg[64];
-    sprintf(msg, "%ld %ld", delay, fileSize);
+    sprintf(msg, "%ld %ld\n", delay, fileSize);
     size_t num_bytes_sent = 0;
     size_t length = strlen(msg) + 1;
     msg[length - 1] = EOF;
