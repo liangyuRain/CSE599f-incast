@@ -1,13 +1,10 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include <assert.h>
-#include <string.h>
 #include <errno.h>
-#include <time.h>
 #include <pthread.h>
 #include <limits.h>
+#include <string.h>
 
 #include <netdb.h>
 #include <sys/types.h>
@@ -15,10 +12,10 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#include "timespec_util.h"
+
 #define DEFAULT_PORT "4000"
 #define RECV_BUFFER_SIZE 512
-#define SEC_TO_NS 1000000000
-#define TIME_UTC_TO_PST (-7 * 3600)
 
 char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
     FILE *fp = fopen(filename, "r");
@@ -65,45 +62,6 @@ struct rpc_result {
     struct timespec send_timestamp, comp_timestamp;
     size_t num_bytes_recv;
 };
-
-struct timespec timespec_diff(struct timespec a, struct timespec b) {
-    struct timespec diff;
-    diff.tv_sec = b.tv_sec - a.tv_sec;
-    diff.tv_nsec = b.tv_nsec - a.tv_nsec;
-    if (diff.tv_nsec < 0) {
-        diff.tv_sec -= 1;
-        diff.tv_nsec += 1000000000l;
-    }
-    return diff;
-}
-
-void timespec_print(struct timespec a, char* buf) {
-    assert(a.tv_sec >= 0);
-    assert(a.tv_nsec >= 0);
-    long hr = a.tv_sec / 3600 % 24;
-    long min = a.tv_sec / 60 % 60;
-    long sec = a.tv_sec % 60;
-    long ms = a.tv_nsec / 1000000;
-    long us = a.tv_nsec / 1000 % 1000;
-    long ns = a.tv_nsec % 1000;
-    sprintf(buf, "%02ld:%02ld:%02ld %ldms %ldus %ldns", hr, min, sec, ms, us, ns);
-}
-
-void timespec_print_diff(struct timespec a, char* buf) {
-    assert(a.tv_sec >= 0);
-    assert(a.tv_nsec >= 0);
-    long sec = a.tv_sec;
-    long ms = a.tv_nsec / 1000000;
-    long us = a.tv_nsec / 1000 % 1000;
-    long ns = a.tv_nsec % 1000;
-    sprintf(buf, "%lds %ldms %ldus %ldns", sec, ms, us, ns);
-}
-
-bool timespec_less(struct timespec a, struct timespec b) {
-    if (a.tv_sec < b.tv_sec) return true;
-    if (a.tv_sec == b.tv_sec && a.tv_nsec < b.tv_nsec) return true;
-    return false;
-}
 
 struct rpc_argv {
     pthread_t thread_id;
@@ -166,9 +124,7 @@ void* virtual_rpc(void *argv) {
         }
         num_bytes_sent += numbytes;
     }
-    struct timespec begin;
-    timespec_get(&begin, TIME_UTC);
-    begin.tv_sec += TIME_UTC_TO_PST;
+    struct timespec begin = timespec_now();
 
     char buf[RECV_BUFFER_SIZE];
     ssize_t num_bytes_recv = 0;
@@ -181,9 +137,7 @@ void* virtual_rpc(void *argv) {
         num_bytes_recv += numbytes;
         if (numbytes == 0) break;
     }
-    struct timespec end;
-    timespec_get(&end, TIME_UTC);
-    end.tv_sec += TIME_UTC_TO_PST;
+    struct timespec end = timespec_now();
 
     char begin_buf[64];
     char end_buf[64];
@@ -257,9 +211,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    struct timespec earliest_send;
-    timespec_get(&earliest_send, TIME_UTC);
-    earliest_send.tv_sec += TIME_UTC_TO_PST;
+    struct timespec earliest_send = timespec_now();
     struct timespec latest_comp = (struct timespec) {.tv_sec = 0, .tv_nsec = 0};
     size_t total_bytes_recv = 0;
     for (size_t i = 0; i < serverCount; ++i) {
