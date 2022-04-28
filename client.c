@@ -17,6 +17,7 @@
 #define DEFAULT_PORT "4000"
 #define RECV_BUFFER_SIZE 512
 
+// read backend servers' IP addresses and ports from file
 char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) exit(1);
@@ -69,6 +70,7 @@ struct rpc_argv {
     } result;
 };
 
+// simulate rpc
 void* virtual_rpc(void *argv) {
     size_t thread_num = ((struct rpc_argv*) argv)->thread_num;
     char* ip_addr = ((struct rpc_argv*) argv)->ip_addr;
@@ -108,6 +110,7 @@ void* virtual_rpc(void *argv) {
 
     struct rpc_result* res = &((struct rpc_argv*) argv)->result;
 
+    // send msg to backend server
     // char msg[] = "/homes/gws/liangyu/CSE550-HW/HW1/partb/test.txt\n";
     char msg[64];
     sprintf(msg, "%ld %ld", delay, fileSize);
@@ -124,6 +127,7 @@ void* virtual_rpc(void *argv) {
     }
     struct timespec begin = timespec_now();
 
+    // receive reply from backend server
     char buf[RECV_BUFFER_SIZE];
     ssize_t num_bytes_recv = 0;
     for (;;) {
@@ -137,6 +141,7 @@ void* virtual_rpc(void *argv) {
     }
     struct timespec end = timespec_now();
 
+    // measure completion time
     char begin_buf[64];
     char end_buf[64];
     char diff_buf[64];
@@ -167,6 +172,7 @@ int main(int argc, char* argv[]) {
     size_t serverFileSize = atol(argv[4]);
     size_t launchInterval = atol(argv[5]);
     
+    // count number of valid server hostnames
     char*** ipAddrPorts = read_server_ipAddrPorts(filename, serverCount);
     for (size_t i = 0; i < serverCount; ++i) {
         if (ipAddrPorts[i] == NULL) {
@@ -175,6 +181,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // build argvs for threads. Each thread run a separate rpc.
     struct rpc_argv* thread_argvs = (struct rpc_argv*) malloc(serverCount * sizeof(struct rpc_argv));
     for (size_t i = 0; i < serverCount; ++i) {
         thread_argvs[i] = (struct rpc_argv) {
@@ -186,6 +193,7 @@ int main(int argc, char* argv[]) {
         };
     }
 
+    // create threads
     for (size_t i = 0; i < serverCount; ++i) {
         unsigned int sleepTime = launchInterval;
         while(sleepTime > 0) {
@@ -201,6 +209,7 @@ int main(int argc, char* argv[]) {
 
     printf("[main] %ld number of threads created\n", serverCount);
 
+    // join all threads
     for (size_t i = 0; i < serverCount; ++i) {
         int status;
         if ((status = pthread_join(thread_argvs[i].thread_id, NULL)) != 0) {
@@ -209,6 +218,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // calculate the earliest rpc send and the latest rpc completion
+    // the total time of rpc is from the earliest rpc send to the latest rpc completion
     struct timespec earliest_send = timespec_now();
     struct timespec latest_comp = (struct timespec) {.tv_sec = 0, .tv_nsec = 0};
     size_t total_bytes_recv = 0;
