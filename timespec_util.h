@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <math.h>
 
 #define SEC_TO_NS 1000000000
 #define TIME_UTC_TO_PST (-7 * 3600)
@@ -50,4 +51,19 @@ bool timespec_less(struct timespec a, struct timespec b) {
     if (a.tv_sec < b.tv_sec) return true;
     if (a.tv_sec == b.tv_sec && a.tv_nsec < b.tv_nsec) return true;
     return false;
+}
+
+struct timespec timespec_avg(struct timespec *results, size_t count) {
+    double fnsec = 0.0;
+    for (size_t i = 0; i < count; ++i) {
+        assert(results[i].tv_sec >= 0);
+        assert(results[i].tv_nsec >= 0);
+        fnsec += results[i].tv_sec * SEC_TO_NS;
+        fnsec += results[i].tv_nsec;
+    }
+    fnsec /= count;
+    return (struct timespec) {
+        .tv_sec = floor(fnsec / SEC_TO_NS),
+        .tv_nsec = round(fmod(fnsec, SEC_TO_NS))
+    };
 }
