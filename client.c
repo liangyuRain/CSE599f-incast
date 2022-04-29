@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
 #include "timespec_util.h"
 
@@ -292,6 +293,11 @@ int main(int argc, char* argv[]) {
         numOfExperiments, total_avg_buf, indiv_avg_buf);
 
     // write results to file named by current time
+    struct stat st = {0};
+    if (stat("expts", &st) == -1) {
+        mkdir("expts", 0700);
+    }
+
     char logfile[64];
     time_t now = timespec_now().tv_sec;
     sprintf(logfile, "expts/expt_%ld_%ld_%ld.tsv", now / 3600 % 24, now / 60 % 60, now % 60);
