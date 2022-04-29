@@ -135,8 +135,9 @@ void* virtual_rpc(void *argv) {
             fprintf(stderr, "[thread %ld] [%s:%s] recv error: %s (%d)\n", thread_num, ip_addr, port, strerror(errno), errno);
             exit(1);
         }
+        assert(numbytes > 0);
         num_bytes_recv += numbytes;
-        if (numbytes == 0) break;
+        if (buf[numbytes - 1] == '\n') break;
     }
     struct timespec end = timespec_now();
 
