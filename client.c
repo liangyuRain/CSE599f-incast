@@ -19,7 +19,10 @@
 // read backend servers' IP addresses and ports from file
 char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
     FILE *fp = fopen(filename, "r");
-    if (fp == NULL) exit(1);
+    if (fp == NULL) {
+        fprintf(stderr, "[main] read hostnames failed: %s (%d)\n", strerror(errno), errno);
+        exit(1);
+    }
 
     char*** ipAddrPorts = (char***) malloc(serverCount * sizeof(char***));
     if (!ipAddrPorts) exit(1);
@@ -66,6 +69,7 @@ struct rpc_argv {
     size_t delay, fileSize;
     struct rpc_result {
         struct timespec send_timestamp, comp_timestamp;
+        struct timespec time_diff;
         size_t num_bytes_recv;
     } result;
 };
@@ -142,6 +146,7 @@ void* virtual_rpc(void *argv) {
         if (buf[numbytes - 1] == '\n') break;
     }
     struct timespec end = timespec_now();
+    struct timespec diff = timespec_diff(begin, end);
 
     // measure completion time
     char begin_buf[64];
@@ -149,7 +154,7 @@ void* virtual_rpc(void *argv) {
     char diff_buf[64];
     timespec_print(begin, begin_buf);
     timespec_print(end, end_buf);
-    timespec_print_diff(timespec_diff(begin, end), diff_buf);
+    timespec_print_diff(diff, diff_buf);
 
     printf("[thread %ld] [%s:%s] [Expt %ld] individual rpc completed:\n"
         "\tsend timestamp: %s\n"
@@ -159,6 +164,7 @@ void* virtual_rpc(void *argv) {
         thread_num, ip_addr, port, exp_num, begin_buf, end_buf, diff_buf, num_bytes_recv);
     res->send_timestamp = begin;
     res->comp_timestamp = end;
+    res->time_diff = diff;
     res->num_bytes_recv = num_bytes_recv;
 
     close(sktfd);
@@ -189,6 +195,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    struct rpc_result *expt_res_log = (struct rpc_result*) malloc(numOfExperiments * sizeof(struct rpc_result));
+    struct rpc_argv *rpc_argv_log = (struct rpc_argv*) malloc(serverCount * numOfExperiments * sizeof(struct rpc_argv));
     struct timespec *total_results = (struct timespec*) malloc(numOfExperiments * sizeof(struct timespec));
     struct timespec *indiv_results = (struct timespec*) malloc(serverCount * numOfExperiments * sizeof(struct timespec));
     for (size_t ex = 0; ex < numOfExperiments; ++ex) {
@@ -238,29 +246,36 @@ int main(int argc, char* argv[]) {
         for (size_t i = 0; i < serverCount; ++i) {
             struct timespec send = thread_argvs[i].result.send_timestamp;
             struct timespec comp = thread_argvs[i].result.comp_timestamp;
-
-            indiv_results[ex * serverCount + i] = timespec_diff(send, comp);
+            indiv_results[ex * serverCount + i] = thread_argvs[i].result.time_diff;
+            rpc_argv_log[ex * serverCount + i] = thread_argvs[i];
 
             earliest_send = timespec_less(send, earliest_send) ? send : earliest_send;
             latest_comp = timespec_less(latest_comp, comp) ? comp : latest_comp;
             total_bytes_recv += thread_argvs[i].result.num_bytes_recv;
         }
 
-        struct timespec diff = timespec_diff(earliest_send, latest_comp);
-        total_results[ex] = diff;
+        struct timespec total_diff = timespec_diff(earliest_send, latest_comp);
+        total_results[ex] = total_diff;
 
         char begin_buf[64];
         char end_buf[64];
         char diff_buf[64];
         timespec_print(earliest_send, begin_buf);
         timespec_print(latest_comp, end_buf);
-        timespec_print_diff(diff, diff_buf);
+        timespec_print_diff(total_diff, diff_buf);
         printf("[main] [Expt %ld] rpc experiment completed:\n"
             "\tearliest send timestamp: %s\n"
             "\tlatest completion timestamp: %s\n"
             "\ttotal time elapsed: %s\n"
             "\ttotal num of bytes received: %ld\n",
             ex, begin_buf, end_buf, diff_buf, total_bytes_recv);
+
+        expt_res_log[ex] = (struct rpc_result) {
+            .send_timestamp = earliest_send,
+            .comp_timestamp = latest_comp,
+            .time_diff = total_diff,
+            .num_bytes_recv = total_bytes_recv
+        };
         
         free(thread_argvs);
     }
@@ -275,6 +290,51 @@ int main(int argc, char* argv[]) {
            "\tAverage RPC Time Cost: %s\n"
            "\tAverage Individual RPC Time Cost: %s\n",
         numOfExperiments, total_avg_buf, indiv_avg_buf);
+
+    // write results to file named by current time
+    char logfile[64];
+    time_t now = timespec_now().tv_sec;
+    sprintf(logfile, "expts/expt_%ld_%ld_%ld.tsv", now / 3600 % 24, now / 60 % 60, now % 60);
+    FILE *fp = fopen(logfile, "w");
+    if (fp == NULL) {
+        fprintf(stderr, "[main] write experiment results failed: %s (%d)\n", strerror(errno), errno);
+        exit(1);
+    }
+
+    fprintf(fp, "thread_num\texp_num\tip_addr\tport\tdelay\tfileSize\tsend_timestamp\tcomp_timestamp\ttime_diff\tnum_bytes_recv\n");
+    for (size_t i = 0; i < numOfExperiments * serverCount; ++i) {
+        struct rpc_argv *log = rpc_argv_log + i;
+
+        char begin_buf[64];
+        char end_buf[64];
+        char diff_buf[64];
+        timespec_print(log->result.send_timestamp, begin_buf);
+        timespec_print(log->result.comp_timestamp, end_buf);
+        timespec_print_diff(log->result.time_diff, diff_buf);
+
+        fprintf(fp, "%ld\t%ld\t%s\t%s\t%ld\t%ld\t%s\t%s\t%s\t%ld\n",
+            log->thread_num, log->exp_num, log->ip_addr, log->port, log->delay, 
+            log->fileSize, begin_buf, end_buf, diff_buf, log->result.num_bytes_recv);
+    }
+
+    fprintf(fp, "\nexp_num\tearliest_send\tlatest_comp\ttotal_diff\ttotal_bytes_recv\n");
+    for (size_t ex = 0; ex < numOfExperiments; ++ex) {
+        struct rpc_result *log = expt_res_log + ex;
+
+        char begin_buf[64];
+        char end_buf[64];
+        char diff_buf[64];
+        timespec_print(log->send_timestamp, begin_buf);
+        timespec_print(log->comp_timestamp, end_buf);
+        timespec_print_diff(log->time_diff, diff_buf);
+
+        fprintf(fp, "%ld\t%s\t%s\t%s\t%ld\n",
+            ex, begin_buf, end_buf, diff_buf, log->num_bytes_recv);
+    }
+
+    fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s", total_avg_buf, indiv_avg_buf);
+
+    fclose(fp);
 
     return 0;
 }
