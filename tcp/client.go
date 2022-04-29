@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"strings"
 )
 
 func main() {
@@ -29,8 +28,7 @@ func main() {
 		request, err := clientReader.ReadString('\n')
 		switch err {
 		case nil:
-			request = strings.TrimSuffix(request, "\n")
-			conn.Write([]byte(request + "\n"))
+			conn.Write([]byte(request))
 		case io.EOF:
 			fmt.Println("Client closed the connection")
 			return
@@ -42,8 +40,7 @@ func main() {
 		reply, err := serverReader.ReadString('\n')
 		switch err {
 		case nil:
-			reply = strings.TrimSuffix(reply, "\n")
-			fmt.Printf("Server reply: %s\n", reply)
+			fmt.Printf("[Server reply] len=%d reply=%s", len(reply), reply)
 		case io.EOF:
 			fmt.Println("Server closed the connection")
 			return

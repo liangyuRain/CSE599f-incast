@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -24,25 +25,30 @@ func main() {
 	}
 	defer listener.Close()
 
+	maxSize := 1 << 20
+	data := make([]byte, maxSize)
+	for i := 0; i < maxSize; i++ {
+		data[i] = '0'
+	}
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Println(err)
 			continue
 		}
-		go handleConnection(conn)
+		go handleConnection(conn, data)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, data []byte) {
 	defer conn.Close()
 	clientReader := bufio.NewReader(conn)
 	for {
 		request, err := clientReader.ReadString('\n')
 		switch err {
 		case nil:
-			request = strings.TrimSuffix(request, "\n")
-			fmt.Printf("Client request: %s\n", request)
+			start := time.Now()
 			args := strings.Fields(request)
 			delay, size := 0, 0
 			if len(args) > 0 {
@@ -51,8 +57,14 @@ func handleConnection(conn net.Conn) {
 			if len(args) > 1 {
 				size, _ = strconv.Atoi(args[1])
 			}
-			reply := fmt.Sprintf("Reply delay=%d size=%d\n", delay, size)
-			conn.Write([]byte(reply))
+			fmt.Printf("[Client request] delay=%d size=%d\n", delay, size)
+			var reply []byte
+			reply = append(reply, data[:size]...)
+			time.Sleep(time.Duration(delay) * time.Microsecond)
+			duration := time.Since(start)
+			reply = append(reply, []byte(fmt.Sprintf(" <delay=%dμs>", duration.Microseconds()))...)
+			reply = append(reply, '\n')
+			conn.Write(reply)
 		case io.EOF:
 			fmt.Println("Client closed the connection")
 			return
