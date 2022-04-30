@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ $# -eq 0 ]; then
-    echo "usage: deploy_client.sh [ssh hostname]"
+    echo "usage: deploy_client.sh [ssh hostname] [--serverCount server_count] [--serverDelay server_delay] [--serverFileSize server_file_size] [--launchInterval launch_interval] [--numOfExperiments num_of_experiments]"
     exit 1
 fi
 
