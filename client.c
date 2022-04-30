@@ -37,7 +37,9 @@ char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
             free(line);
             continue;
         }
-        char* ip_addr = strtok(line, " :\t\n\0");
+        char* ssh_host = strtok(line, " :\t\n\0");
+        if (ssh_host == NULL) continue;
+        char* ip_addr = strtok(NULL, " :\t\n\0");
         if (ip_addr == NULL) continue;
         char* port = strtok(NULL, " :\t\n\0");
         if (port == NULL) port = DEFAULT_PORT;
@@ -175,7 +177,7 @@ void* virtual_rpc(void *argv) {
 
 int main(int argc, char* argv[]) {
     if (argc != 7) {
-        fprintf(stderr, "usage: ./client [hostname file] [server count] [server delay] " 
+        fprintf(stderr, "usage: client [hostname file] [server count] [server delay] " 
                         "[server file size] [rpc launch interval] [num of experiments]\n");
         exit(1);
     }
@@ -186,6 +188,15 @@ int main(int argc, char* argv[]) {
     size_t serverFileSize = atol(argv[4]);
     size_t launchInterval = atol(argv[5]);
     size_t numOfExperiments = atol(argv[6]);
+
+    printf("[main] parameters:\n"
+        "\tfilename: %s\n"
+        "\tserverCount: %ld\n"
+        "\tserverDelay: %ld\n"
+        "\tserverFileSize: %ld\n"
+        "\tlaunchInterval: %ld\n"
+        "\tnumOfExperiments: %ld\n",
+        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments);
     
     // count number of valid server hostnames
     char*** ipAddrPorts = read_server_ipAddrPorts(filename, serverCount);
@@ -307,7 +318,15 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    fprintf(fp, "thread_num\texp_num\tip_addr\tport\tdelay\tfileSize\tsend_timestamp\tcomp_timestamp\ttime_diff\tnum_bytes_recv\n");
+    fprintf(fp, "filename\t%s\n"
+        "serverCount\t%ld\n"
+        "serverDelay\t%ld\n"
+        "serverFileSize\t%ld\n"
+        "launchInterval\t%ld\n"
+        "numOfExperiments\t%ld\n",
+        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments);
+
+    fprintf(fp, "\nthread_num\texp_num\tip_addr\tport\tdelay\tfileSize\tsend_timestamp\tcomp_timestamp\ttime_diff\tnum_bytes_recv\n");
     for (size_t i = 0; i < numOfExperiments * serverCount; ++i) {
         struct rpc_argv *log = rpc_argv_log + i;
 
