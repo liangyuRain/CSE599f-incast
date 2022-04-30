@@ -25,7 +25,7 @@ go version || retVal=1
 if [ $retVal -eq 1 ]; then
   if [ ! -f go1.18.1.linux-amd64.tar.gz ]; then
     echo "Go has not been installed. Installing..."
-    wget https://go.dev/dl/go1.18.1.linux-amd64.tar.gz
+    wget -q https://go.dev/dl/go1.18.1.linux-amd64.tar.gz
     sudo rm -rf /usr/local/go
     sudo tar -C /usr/local -xzf go1.18.1.linux-amd64.tar.gz
   fi

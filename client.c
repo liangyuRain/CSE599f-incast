@@ -177,8 +177,8 @@ void* virtual_rpc(void *argv) {
 
 int main(int argc, char* argv[]) {
     if (argc != 7) {
-        fprintf(stderr, "usage: client [hostname file] [server count] [server delay] " 
-                        "[server file size] [rpc launch interval] [num of experiments]\n");
+        fprintf(stderr, "usage: client [hostname file] [server count] [server delay (us)] " 
+                        "[server file size (byte)] [rpc launch interval (us)] [num of experiments]\n");
         exit(1);
     }
 
@@ -192,9 +192,9 @@ int main(int argc, char* argv[]) {
     printf("[main] parameters:\n"
         "\tfilename: %s\n"
         "\tserverCount: %ld\n"
-        "\tserverDelay: %ld\n"
-        "\tserverFileSize: %ld\n"
-        "\tlaunchInterval: %ld\n"
+        "\tserverDelay(us): %ld\n"
+        "\tserverFileSize(byte): %ld\n"
+        "\tlaunchInterval(us): %ld\n"
         "\tnumOfExperiments: %ld\n",
         filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments);
     
@@ -227,9 +227,17 @@ int main(int argc, char* argv[]) {
 
         // create threads
         for (size_t i = 0; i < serverCount; ++i) {
-            unsigned int sleepTime = launchInterval;
-            while(sleepTime > 0) {
-                sleepTime = sleep(sleepTime);
+            struct timespec req = (struct timespec) {
+                .tv_sec = launchInterval * US_TO_NS / SEC_TO_NS,
+                .tv_nsec = launchInterval * US_TO_NS % SEC_TO_NS
+            };
+            while(req.tv_sec > 0 || req.tv_nsec > 0) {
+                struct timespec rem = (struct timespec) {
+                    .tv_sec = 0,
+                    .tv_nsec = 0
+                };
+                nanosleep(&req, &rem);
+                req = rem;
             }
 
             int status;
@@ -296,8 +304,8 @@ int main(int argc, char* argv[]) {
     struct timespec indiv_avg = timespec_avg(indiv_results, serverCount * numOfExperiments);
     char total_avg_buf[64];
     char indiv_avg_buf[64];
-    timespec_print(total_avg, total_avg_buf);
-    timespec_print(indiv_avg, indiv_avg_buf);
+    timespec_print_diff(total_avg, total_avg_buf);
+    timespec_print_diff(indiv_avg, indiv_avg_buf);
     printf("[main] %ld num of experiments completed:\n" 
            "\tAverage RPC Time Cost: %s\n"
            "\tAverage Individual RPC Time Cost: %s\n",
@@ -323,9 +331,9 @@ int main(int argc, char* argv[]) {
 
     fprintf(fp, "filename\t%s\n"
         "serverCount\t%ld\n"
-        "serverDelay\t%ld\n"
-        "serverFileSize\t%ld\n"
-        "launchInterval\t%ld\n"
+        "serverDelay(us)\t%ld\n"
+        "serverFileSize(byte)\t%ld\n"
+        "launchInterval(us)\t%ld\n"
         "numOfExperiments\t%ld\n",
         filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments);
 
@@ -361,6 +369,8 @@ int main(int argc, char* argv[]) {
     }
 
     fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s", total_avg_buf, indiv_avg_buf);
+
+    printf("[main] log written to %s\n", logfile);
 
     fclose(fp);
 

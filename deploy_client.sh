@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ $# -eq 0 ]; then
-    echo "usage: deploy_client.sh [ssh hostname] [--serverCount server_count] [--serverDelay server_delay] [--serverFileSize server_file_size] [--launchInterval launch_interval] [--numOfExperiments num_of_experiments]"
+    echo "usage: deploy_client.sh [ssh hostname] [--serverCount server_count] [--serverDelay server_delay (us)] [--serverFileSize server_file_size (byte)] [--launchInterval launch_interval (us)] [--numOfExperiments num_of_experiments]"
     exit 1
 fi
 
@@ -53,4 +53,4 @@ done
 
 echo "Deploying client to ${SSH_HOST}..."
 scp -r [!.]* "${SSH_HOST}:~/"
-ssh -n "${SSH_HOST}" "cd ${PWD##*/} ; bash ${RUN_SCRIPT} ${CONFIG} ${SERVER_COUNT} ${SERVER_DELAY} ${SERVER_FILE_SIZE} ${LAUNCH_INTERVAL} ${NUM_OF_EXPERIMENTS}"
+ssh -n "${SSH_HOST}" "bash ${RUN_SCRIPT} ${CONFIG} ${SERVER_COUNT} ${SERVER_DELAY} ${SERVER_FILE_SIZE} ${LAUNCH_INTERVAL} ${NUM_OF_EXPERIMENTS}"

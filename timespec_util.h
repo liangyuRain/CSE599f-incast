@@ -5,6 +5,7 @@
 #include <math.h>
 
 #define SEC_TO_NS 1000000000
+#define US_TO_NS 1000
 #define TIME_UTC_TO_PST (-7 * 3600)
 
 struct timespec timespec_now() {
