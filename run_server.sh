@@ -39,5 +39,5 @@ if [ ! -f $SERVER ]; then
   git clone https://github.com/liangyuRain/CSE599f-incast.git
 fi
 
-echo "Running server at ${HOST} and port ${PORT}"
+echo "Running server at ${HOST}:${PORT}..."
 tmux new-session -d -s server_${PORT} "go run ${SERVER} --host ${HOST} --port ${PORT}"
