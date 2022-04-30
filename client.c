@@ -309,9 +309,12 @@ int main(int argc, char* argv[]) {
         mkdir("expts", 0700);
     }
 
+    time_t now = time(NULL);
+    now += TIME_UTC_TO_PST;
+    struct tm *now_tm = gmtime(&now);
     char logfile[64];
-    time_t now = timespec_now().tv_sec;
-    sprintf(logfile, "expts/expt_%ld_%ld_%ld.tsv", now / 3600 % 24, now / 60 % 60, now % 60);
+    sprintf(logfile, "expts/expt_%d_%d_%d_%d_%d.tsv",
+        now_tm->tm_mon + 1, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec);
     FILE *fp = fopen(logfile, "w");
     if (fp == NULL) {
         fprintf(stderr, "[main] write experiment results failed: %s (%d)\n", strerror(errno), errno);
