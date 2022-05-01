@@ -132,6 +132,7 @@ void* virtual_rpc(void *argv) {
     struct rpc_result* res = &((struct rpc_argv*) argv)->result;
     char *recv_buf = (char *) malloc((ADDITIONAL_RECV_BYTES + fileSize) * sizeof(char));
 
+    printf("[thread %ld] [%s:%s] [Expt %ld] tcp connected; thread ready to go\n", thread_num, ip_addr, port, exp_num);
     ready_flags[thread_num] = true;
     while(!start_flag);
 
@@ -179,6 +180,7 @@ void* virtual_rpc(void *argv) {
     }
     struct timespec end = timespec_now();
     struct timespec diff = timespec_diff(begin, end);
+    double goodput = num_bytes_recv * 1.0 / (diff.tv_sec * SEC_TO_NS + diff.tv_nsec - delay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
 
     free(recv_buf);
 
@@ -194,13 +196,14 @@ void* virtual_rpc(void *argv) {
         "\tsend timestamp: %s\n"
         "\tcompletion timestamp: %s\n"
         "\ttime elapsed: %s\n"
-        "\tnum_bytes_recv: %ld\n",
-        thread_num, ip_addr, port, exp_num, begin_buf, end_buf, diff_buf, num_bytes_recv);
+        "\tnum_bytes_recv: %ld\n"
+        "\tgoodput: %ldKbps\n",
+        thread_num, ip_addr, port, exp_num, begin_buf, end_buf, diff_buf, num_bytes_recv, (size_t) round(goodput));
     res->send_timestamp = begin;
     res->comp_timestamp = end;
     res->time_diff = diff;
     res->num_bytes_recv = num_bytes_recv;
-    res->goodput = num_bytes_recv * 1.0 / (diff.tv_sec * SEC_TO_NS + diff.tv_nsec - delay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
+    res->goodput = goodput;
 
     close(sktfd);
 
@@ -286,6 +289,8 @@ int main(int argc, char* argv[]) {
         }
         start_flag = true;
 
+        printf("[main] [Expt %ld] experiment green light\n", ex);
+
         // join all threads
         for (size_t i = 0; i < serverCount; ++i) {
             int status;
@@ -326,8 +331,9 @@ int main(int argc, char* argv[]) {
             "\tearliest send timestamp: %s\n"
             "\tlatest completion timestamp: %s\n"
             "\ttotal time elapsed: %s\n"
-            "\ttotal num of bytes received: %ld\n",
-            ex, begin_buf, end_buf, diff_buf, total_bytes_recv);
+            "\ttotal num of bytes received: %ld\n"
+            "\texperiment goodput: %ldKbps\n",
+            ex, begin_buf, end_buf, diff_buf, total_bytes_recv, (size_t) round(total_goodput));
 
         expt_res_log[ex] = (struct rpc_result) {
             .send_timestamp = earliest_send,
