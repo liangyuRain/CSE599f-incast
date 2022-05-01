@@ -79,15 +79,7 @@ struct rpc_argv {
     } result;
 };
 
-// simulate rpc
-void* virtual_rpc(void *argv) {
-    size_t thread_num = ((struct rpc_argv*) argv)->thread_num;
-    size_t exp_num = ((struct rpc_argv*) argv)->exp_num;
-    char* ip_addr = ((struct rpc_argv*) argv)->ip_addr;
-    char* port = ((struct rpc_argv*) argv)->port;
-    size_t delay = ((struct rpc_argv*) argv)->delay;
-    size_t fileSize = ((struct rpc_argv*) argv)->fileSize;
-
+int tcp_connect(size_t exp_num, size_t thread_num, char *ip_addr, char *port) {
     struct addrinfo hints;
     struct addrinfo *servinfo;
 
@@ -118,8 +110,28 @@ void* virtual_rpc(void *argv) {
     printf("[thread %ld] [%s:%s] [Expt %ld] connecting to %s\n", thread_num, ip_addr, port, exp_num, addr);
     freeaddrinfo(servinfo);
 
+    return sktfd;
+}
+
+bool start_flag;
+bool* ready_flags;
+
+// simulate rpc
+void* virtual_rpc(void *argv) {
+    size_t thread_num = ((struct rpc_argv*) argv)->thread_num;
+    size_t exp_num = ((struct rpc_argv*) argv)->exp_num;
+    char* ip_addr = ((struct rpc_argv*) argv)->ip_addr;
+    char* port = ((struct rpc_argv*) argv)->port;
+    size_t delay = ((struct rpc_argv*) argv)->delay;
+    size_t fileSize = ((struct rpc_argv*) argv)->fileSize;
+
+    int sktfd = tcp_connect(exp_num, thread_num, ip_addr, port);
+
     struct rpc_result* res = &((struct rpc_argv*) argv)->result;
     char *recv_buf = (char *) malloc((ADDITIONAL_RECV_BYTES + fileSize) * sizeof(char));
+
+    ready_flags[thread_num] = true;
+    while(!start_flag);
 
     // send msg to backend server
     // char msg[] = "/homes/gws/liangyu/CSE550-HW/HW1/partb/test.txt\n";
@@ -212,6 +224,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    ready_flags = (bool*) malloc(serverCount * sizeof(bool));
+
     struct rpc_result *expt_res_log = (struct rpc_result*) malloc(numOfExperiments * sizeof(struct rpc_result));
     struct rpc_argv *rpc_argv_log = (struct rpc_argv*) malloc(serverCount * numOfExperiments * sizeof(struct rpc_argv));
     struct timespec *total_results = (struct timespec*) malloc(numOfExperiments * sizeof(struct timespec));
@@ -229,6 +243,11 @@ int main(int argc, char* argv[]) {
                 .delay = serverDelay,
                 .fileSize = serverFileSize
             };
+        }
+
+        start_flag = false;
+        for (size_t i = 0; i < serverCount; ++i) {
+            ready_flags[i] = false;
         }
 
         // create threads
@@ -254,6 +273,15 @@ int main(int argc, char* argv[]) {
         }
 
         printf("[main] [Expt %ld] %ld num of threads created\n", ex, serverCount);
+
+        for(;;) {
+            bool start = true;
+            for (size_t i = 0; i < serverCount; ++i) {
+                start = start && ready_flags[i];
+            }
+            if (start) break;
+        }
+        start_flag = true;
 
         // join all threads
         for (size_t i = 0; i < serverCount; ++i) {
