@@ -16,7 +16,7 @@
 
 #define DEFAULT_PORT "4000"
 #define ADDITIONAL_RECV_BYTES 128
-#define Bps_TO_Mbps (8.0 / 1000.0 / 1000.0)
+#define Bps_TO_Kbps (8.0 / 1000.0)
 
 // read backend servers' IP addresses and ports from file
 char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
@@ -200,7 +200,7 @@ void* virtual_rpc(void *argv) {
     res->comp_timestamp = end;
     res->time_diff = diff;
     res->num_bytes_recv = num_bytes_recv;
-    res->goodput = num_bytes_recv * 1.0 / (diff.tv_sec * SEC_TO_NS + diff.tv_nsec - delay * US_TO_NS) * SEC_TO_NS * Bps_TO_Mbps; // Mbps
+    res->goodput = num_bytes_recv * 1.0 / (diff.tv_sec * SEC_TO_NS + diff.tv_nsec - delay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
 
     close(sktfd);
 
@@ -313,7 +313,7 @@ int main(int argc, char* argv[]) {
 
         struct timespec total_diff = timespec_diff(earliest_send, latest_comp);
         total_results[ex] = total_diff;
-        double total_goodput = total_bytes_recv * 1.0 / (total_diff.tv_sec * SEC_TO_NS + total_diff.tv_nsec - serverDelay * US_TO_NS) * SEC_TO_NS * Bps_TO_Mbps; // Mbps
+        double total_goodput = total_bytes_recv * 1.0 / (total_diff.tv_sec * SEC_TO_NS + total_diff.tv_nsec - serverDelay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
         total_goodput_over_expts += total_goodput;
 
         char begin_buf[64];
@@ -350,7 +350,7 @@ int main(int argc, char* argv[]) {
     printf("[main] %ld num of experiments completed:\n" 
            "\tAverage RPC Time Cost: %s\n"
            "\tAverage Individual RPC Time Cost: %s\n"
-           "\tAverage Goodput: %ldMbps\n",
+           "\tAverage Goodput: %ldKbps\n",
         numOfExperiments, total_avg_buf, indiv_avg_buf, avg_goodput);
 
     // write results to file named by current time
@@ -390,7 +390,7 @@ int main(int argc, char* argv[]) {
         timespec_print(log->result.comp_timestamp, end_buf);
         timespec_print_diff(log->result.time_diff, diff_buf);
 
-        fprintf(fp, "%ld\t%ld\t%s\t%s\t%ld\t%ld\t%s\t%s\t%s\t%ld\t%ldMbps\n",
+        fprintf(fp, "%ld\t%ld\t%s\t%s\t%ld\t%ld\t%s\t%s\t%s\t%ld\t%ldKbps\n",
             log->exp_num, log->thread_num, log->ip_addr, log->port, log->delay, 
             log->fileSize, begin_buf, end_buf, diff_buf, log->result.num_bytes_recv, (size_t) round(log->result.goodput));
     }
@@ -406,11 +406,11 @@ int main(int argc, char* argv[]) {
         timespec_print(log->comp_timestamp, end_buf);
         timespec_print_diff(log->time_diff, diff_buf);
 
-        fprintf(fp, "%ld\t%s\t%s\t%s\t%ld\t%ldMbps\n",
+        fprintf(fp, "%ld\t%s\t%s\t%s\t%ld\t%ldKbps\n",
             ex, begin_buf, end_buf, diff_buf, log->num_bytes_recv, (size_t) round(log->goodput));
     }
 
-    fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s\navg_rpc_goodput\t%ldMbps\n",
+    fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s\navg_rpc_goodput\t%ldKbps\n",
         total_avg_buf, indiv_avg_buf, avg_goodput);
 
     printf("[main] log written to %s\n", logfile);
