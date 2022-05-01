@@ -71,6 +71,7 @@ struct rpc_argv {
     size_t exp_num;
     char *ip_addr, *port;
     size_t delay, fileSize;
+    size_t launchDelay;
     struct rpc_result {
         struct timespec send_timestamp, comp_timestamp;
         struct timespec time_diff;
@@ -124,6 +125,7 @@ void* virtual_rpc(void *argv) {
     char* port = ((struct rpc_argv*) argv)->port;
     size_t delay = ((struct rpc_argv*) argv)->delay;
     size_t fileSize = ((struct rpc_argv*) argv)->fileSize;
+    size_t launchDelay = ((struct rpc_argv*) argv)->launchDelay;
 
     int sktfd = tcp_connect(exp_num, thread_num, ip_addr, port);
 
@@ -132,6 +134,19 @@ void* virtual_rpc(void *argv) {
 
     ready_flags[thread_num] = true;
     while(!start_flag);
+
+    struct timespec req = (struct timespec) {
+        .tv_sec = launchDelay * US_TO_NS / SEC_TO_NS,
+        .tv_nsec = launchDelay * US_TO_NS % SEC_TO_NS
+    };
+    while(req.tv_sec > 0 || req.tv_nsec > 0) {
+        struct timespec rem = (struct timespec) {
+            .tv_sec = 0,
+            .tv_nsec = 0
+        };
+        nanosleep(&req, &rem);
+        req = rem;
+    }
 
     // send msg to backend server
     // char msg[] = "/homes/gws/liangyu/CSE550-HW/HW1/partb/test.txt\n";
@@ -241,7 +256,8 @@ int main(int argc, char* argv[]) {
                 .ip_addr = ipAddrPorts[i][0],
                 .port = ipAddrPorts[i][1],
                 .delay = serverDelay,
-                .fileSize = serverFileSize
+                .fileSize = serverFileSize,
+                .launchDelay = launchInterval * i
             };
         }
 
@@ -252,19 +268,6 @@ int main(int argc, char* argv[]) {
 
         // create threads
         for (size_t i = 0; i < serverCount; ++i) {
-            struct timespec req = (struct timespec) {
-                .tv_sec = launchInterval * US_TO_NS / SEC_TO_NS,
-                .tv_nsec = launchInterval * US_TO_NS % SEC_TO_NS
-            };
-            while(req.tv_sec > 0 || req.tv_nsec > 0) {
-                struct timespec rem = (struct timespec) {
-                    .tv_sec = 0,
-                    .tv_nsec = 0
-                };
-                nanosleep(&req, &rem);
-                req = rem;
-            }
-
             int status;
             if ((status = pthread_create(&thread_argvs[i].thread_id, NULL, virtual_rpc, thread_argvs + i)) != 0) {
                 fprintf(stderr, "[main] [Expt %ld] thread %ld creation failed: %d\n", ex, i, status);
