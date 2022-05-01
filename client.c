@@ -269,7 +269,6 @@ int main(int argc, char* argv[]) {
         struct timespec earliest_send = timespec_now();
         struct timespec latest_comp = (struct timespec) {.tv_sec = 0, .tv_nsec = 0};
         size_t total_bytes_recv = 0;
-        double total_goodput = 0;
         for (size_t i = 0; i < serverCount; ++i) {
             struct timespec send = thread_argvs[i].result.send_timestamp;
             struct timespec comp = thread_argvs[i].result.comp_timestamp;
@@ -279,11 +278,11 @@ int main(int argc, char* argv[]) {
             earliest_send = timespec_less(send, earliest_send) ? send : earliest_send;
             latest_comp = timespec_less(latest_comp, comp) ? comp : latest_comp;
             total_bytes_recv += thread_argvs[i].result.num_bytes_recv;
-            total_goodput += thread_argvs[i].result.goodput;
         }
 
         struct timespec total_diff = timespec_diff(earliest_send, latest_comp);
         total_results[ex] = total_diff;
+        double total_goodput = total_bytes_recv * 1.0 / (total_diff.tv_sec * SEC_TO_NS + total_diff.tv_nsec - serverDelay * US_TO_NS) * SEC_TO_NS * Bps_TO_Mbps; // Mbps
         total_goodput_over_expts += total_goodput;
 
         char begin_buf[64];
