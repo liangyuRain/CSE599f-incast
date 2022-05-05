@@ -16,10 +16,6 @@ import geni.urn
 # geni.portal.context.defineParameter( "NUM_DC", "number of datacenters", geni.portal.ParameterType.INTEGER, 2)
 
 geni.portal.context.defineParameter("NUM_WORKERS", "number of total workers", geni.portal.ParameterType.INTEGER, 9)
-geni.portal.context.defineParameter("CLIENT_BW", "client bandwidth in kbps", geni.portal.ParameterType.INTEGER,
-                                    1000)
-geni.portal.context.defineParameter("BACKEND_BW", "backend bandwidth in kbps", geni.portal.ParameterType.INTEGER,
-                                    10000000)
 
 geni.portal.context.defineParameter("size_mnt", "The size for /mnt (GB)", geni.portal.ParameterType.INTEGER, 80)
 geni.portal.context.defineParameter("size_home", "The size for /users (GB)", geni.portal.ParameterType.INTEGER, 15)
