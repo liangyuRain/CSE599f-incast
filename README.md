@@ -15,3 +15,7 @@ user@server3 10.0.0.3 5000
 2. Run `deploy_server.sh` to deploy the servers. Each server has a tmux session named `server_[PORT]` on the physical server. For example, the first server of the above `servers.config` is going to have a tmux session `server_4000` on `user@server1`.
 3. Run `deploy_client.sh [ssh hostname] [--serverCount server_count] [--serverDelay server_delay (us)] [--serverFileSize server_file_size (byte)] [--launchInterval launch_interval (us)] [--numOfExperiments num_of_experiments]` to deploy the client. Only the first argument `[ssh hostname]` (e.g. `user@server4`) is required. `server_count` is 1 by default.
 4. Run `kill.sh` to kill all deployed servers.
+
+### Limit Client Bandwidth
+
+Run `bash set_bw_limit.sh [ssh hostname] [speed limit (Kbps)]` to limit the downlink speed of target host. A speed limit less than or equal to 0 will clear the speed limit on target host.
