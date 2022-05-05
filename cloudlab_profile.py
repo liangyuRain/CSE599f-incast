@@ -29,9 +29,6 @@ params = geni.portal.context.bindParameters()
 NUM_WORKERS = params.NUM_WORKERS
 # NUM_DC = NUM_WORKERS
 
-CLIENT_BW = params.CLIENT_BW
-BACKEND_BW = params.BACKEND_BW
-
 size_mnt = params.size_mnt
 size_home = params.size_home
 
