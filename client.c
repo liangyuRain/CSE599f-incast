@@ -149,6 +149,8 @@ void* virtual_rpc(void *argv) {
         req = rem;
     }
 
+    struct timespec begin = timespec_now();
+
     // send msg to backend server
     // char msg[] = "/homes/gws/liangyu/CSE550-HW/HW1/partb/test.txt\n";
     char msg[64];
@@ -166,7 +168,6 @@ void* virtual_rpc(void *argv) {
     }
 
     // receive reply from backend server
-    struct timespec begin = timespec_now();
     ssize_t num_bytes_recv = 0;
     for (;;) {
         ssize_t numbytes;
