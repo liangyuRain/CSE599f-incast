@@ -1,17 +1,13 @@
 #!/bin/bash
 
-PORT="4000"
-HOST="127.0.0.1"
+CONFIG="servers.config"
+
+LOCAL_SSH_HOST=""
 while [[ $# -gt 0 ]]; do
   key="$1"
   case $key in
-    --port)
-      PORT="$2"
-      shift
-      shift
-      ;;
     --host)
-      HOST="$2"
+      LOCAL_SSH_HOST="$2"
       shift
       shift
       ;;
@@ -39,5 +35,16 @@ if [ ! -f $SERVER ]; then
   git clone https://github.com/liangyuRain/CSE599f-incast.git
 fi
 
-echo "Running server at ${HOST}:${PORT}..."
-tmux new-session -d -s server_${PORT} "go run ${SERVER} --host ${HOST} --port ${PORT}"
+while IFS= read -r line
+do
+  tokens=( $line )
+  SSH_HOST=${tokens[0]}
+  HOST=${tokens[1]}
+  PORT=${tokens[2]}
+
+  if [ "${SSH_HOST}" == "${LOCAL_SSH_HOST}" ]; then
+    echo "Launching server on ${SSH_HOST} at ${HOST}:${PORT} ..."
+    tmux new-session -d -s server_${PORT} "go run ${SERVER} --host ${HOST} --port ${PORT}"
+    echo "Launching server on ${SSH_HOST} at ${HOST}:${PORT} ... done"
+  fi
+done < "${CONFIG}"
