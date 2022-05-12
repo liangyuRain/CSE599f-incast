@@ -48,7 +48,6 @@ func handleConnection(conn net.Conn, data []byte) {
 		request, err := clientReader.ReadString('\n')
 		switch err {
 		case nil:
-			start := time.Now()
 			args := strings.Fields(request)
 			delay, size := 0, 0
 			if len(args) > 0 {
@@ -61,8 +60,6 @@ func handleConnection(conn net.Conn, data []byte) {
 			var reply []byte
 			reply = append(reply, data[:size]...)
 			time.Sleep(time.Duration(delay) * time.Microsecond)
-			duration := time.Since(start)
-			reply = append(reply, []byte(fmt.Sprintf(" <delay=%dμs>", duration.Microseconds()))...)
 			reply = append(reply, '\n')
 			conn.Write(reply)
 		case io.EOF:
