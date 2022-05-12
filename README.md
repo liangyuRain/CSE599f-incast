@@ -19,3 +19,11 @@ user@server3 10.0.0.3 5000
 ### Limit Client Bandwidth
 
 Run `bash set_bw_limit.sh [ssh hostname] [speed limit (Kbps)]` to limit the downlink speed of target host. A speed limit less than or equal to 0 will clear the speed limit on target host.
+
+## Dell S4080
+1. Enter `enable` to enter EXEC Privilege mode.
+2. Use `show interfaces | grep "is up"` to see the connected interfaces. Each interface should correspond to one server connected to the switch.
+3. Enter `conf` to enter configuration mode.
+4. Enter `interface TenGigabitEthernet 1/xx` to enter the configuration mode of specific interface.
+5. Use `rate police 1` and `rate shape 1` to limit the incoming speed and outgoing speed to be 1 Mbps.
+6. Use `iperf -s` and `iperf -c 10.0.0.x` to find out the speed of which server is limited.
