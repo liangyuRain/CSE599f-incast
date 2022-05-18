@@ -17,6 +17,7 @@
 #define DEFAULT_PORT "4000"
 #define ADDITIONAL_RECV_BYTES 128
 #define Bps_TO_Kbps (8.0 / 1000.0)
+#define RECV_TIMEOUT 5 // min
 
 // read backend servers' IP addresses and ports from file
 char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
@@ -106,6 +107,13 @@ int tcp_connect(size_t exp_num, size_t thread_num, char *ip_addr, char *port) {
         exit(1);
     }
 
+    // set recv timeout to be 5 min
+    struct timeval tv = (struct timeval) {
+        .tv_sec = 60 * RECV_TIMEOUT,
+        .tv_usec = 0
+    };
+    setsockopt(sktfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+
     char addr[INET6_ADDRSTRLEN];
     inet_ntop(servinfo->ai_family, get_in_addr((struct sockaddr*) servinfo->ai_addr), addr, sizeof(addr));
     printf("[thread %ld] [%s:%s] [Expt %ld] connecting to %s\n", thread_num, ip_addr, port, exp_num, addr);
@@ -171,15 +179,33 @@ void* virtual_rpc(void *argv) {
 
     // receive reply from backend server
     ssize_t num_bytes_recv = 0;
+    ssize_t last_num_bytes = -1;
     for (;;) {
         ssize_t numbytes;
-        if ((numbytes = recv(sktfd, recv_buf, ADDITIONAL_RECV_BYTES + fileSize, 0)) == -1) {
-            fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] recv error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
-            exit(1);
+        if ((numbytes = recv(sktfd, recv_buf, ADDITIONAL_RECV_BYTES + fileSize, 0)) <= 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                printf("[thread %ld] [%s:%s] [Expt %ld] recv timeout (%d min) triggered. %ld bytes received. Continue recv.\n", thread_num, ip_addr, port, exp_num, RECV_TIMEOUT, num_bytes_recv);
+                if (last_num_bytes > 0) {
+                    char str[256];
+                    size_t begin = 0;
+                    begin += sprintf(&str[begin], "[thread %ld] [%s:%s] [Expt %ld] last recv has %ld bytes: \"", thread_num, ip_addr, port, exp_num, last_num_bytes);
+                    for (size_t i = 0; i < (10 <= last_num_bytes ? 10 : last_num_bytes); ++i) {
+                        begin += sprintf(&str[begin], "%02x ", recv_buf[i]);
+                    }
+                    --begin; // remove the last space
+                    begin += sprintf(&str[begin], "\" (display up to 10 tail bytes)\n");
+                    printf("%s", str);
+                }
+                continue;
+            } else {
+                fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] recv error: %s (%d), numbytes = %ld\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno, numbytes);
+                exit(1);
+            }
+        } else {
+            num_bytes_recv += numbytes;
+            last_num_bytes = numbytes;
+            if (recv_buf[numbytes - 1] == '\n') break;
         }
-        assert(numbytes > 0);
-        num_bytes_recv += numbytes;
-        if (recv_buf[numbytes - 1] == '\n') break;
     }
     struct timespec end = timespec_now();
     struct timespec diff = timespec_diff(begin, end);
