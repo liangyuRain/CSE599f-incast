@@ -43,6 +43,7 @@ func main() {
 
 func handleConnection(conn net.Conn, data []byte) {
 	defer conn.Close()
+	conn.SetDeadline(time.Time{})
 	clientReader := bufio.NewReader(conn)
 	for {
 		request, err := clientReader.ReadString('\n')
