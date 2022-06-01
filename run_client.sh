@@ -7,6 +7,6 @@ fi
 
 echo "Building client..."
 make clean
-make
+make client
 echo "Running client..."
 ./client $1 $2 $3 $4 $5 $6

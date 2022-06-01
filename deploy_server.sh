@@ -14,8 +14,7 @@ SSH_HOSTs=$(echo "${SSH_HOSTs%,*}" | tr ',' '\n' | sort -u)
 while IFS= read -r line
 do
   echo "Sending ${RUN_SCRIPT} to ${line} ..."
-  scp -o "StrictHostKeyChecking=no" "${CONFIG}" "${line}:~/"
-  scp -o "StrictHostKeyChecking=no" "${RUN_SCRIPT}" "${line}:~/"
+  scp -r -o "StrictHostKeyChecking=no" [!.]* "${line}:~/"
   echo "Sending ${RUN_SCRIPT} to ${line} ... done"
 
   echo "Deploying servers on ${line} ..."

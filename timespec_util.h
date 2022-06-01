@@ -68,3 +68,18 @@ struct timespec timespec_avg(struct timespec *results, size_t count) {
         .tv_nsec = round(fmod(fnsec, SEC_TO_NS))
     };
 }
+
+void sleepforus(size_t time) {
+    struct timespec req = (struct timespec) {
+        .tv_sec = time * US_TO_NS / SEC_TO_NS,
+        .tv_nsec = time * US_TO_NS % SEC_TO_NS
+    };
+    while(req.tv_sec > 0 || req.tv_nsec > 0) {
+        struct timespec rem = (struct timespec) {
+            .tv_sec = 0,
+            .tv_nsec = 0
+        };
+        nanosleep(&req, &rem);
+        req = rem;
+    }
+}

@@ -17,23 +17,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-go version || retVal=1
-if [ $retVal -eq 1 ]; then
-  if [ ! -f go1.18.1.linux-amd64.tar.gz ]; then
-    echo "Go has not been installed. Installing..."
-    wget -q https://go.dev/dl/go1.18.1.linux-amd64.tar.gz
-    sudo rm -rf /usr/local/go
-    sudo tar -C /usr/local -xzf go1.18.1.linux-amd64.tar.gz
-  fi
-  export PATH=$PATH:/usr/local/go/bin
-  go version
-fi
-
-SERVER=~/CSE599f-incast/tcp/server.go
-if [ ! -f $SERVER ]; then
-  echo "${SERVER} does not exist. Cloning..."
-  git clone https://github.com/liangyuRain/CSE599f-incast.git
-fi
+echo "Building server ..."
+make clean
+make server
+echo "Building server ... done"
 
 while IFS= read -r line
 do
@@ -44,7 +31,7 @@ do
 
   if [ "${SSH_HOST}" == "${LOCAL_SSH_HOST}" ]; then
     echo "Launching server on ${SSH_HOST} at ${HOST}:${PORT} ..."
-    tmux new-session -d -s server_${PORT} "go run ${SERVER} --host ${HOST} --port ${PORT}"
+    tmux new-session -d -s server_${PORT} "bash -c 'stdbuf --output=L ./server ${HOST} ${PORT} 2>&1 | tee server_${PORT}.log'"
     echo "Launching server on ${SSH_HOST} at ${HOST}:${PORT} ... done"
   fi
 done < "${CONFIG}"
