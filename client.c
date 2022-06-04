@@ -17,7 +17,8 @@
 #define DEFAULT_PORT "4000"
 #define ADDITIONAL_RECV_BYTES 128
 #define Bps_TO_Kbps (8.0 / 1000.0)
-#define RECV_TIMEOUT 5 // min
+#define RECV_TIMEOUT 10 // sec
+#define RECONNECT_INTERVAL 1 // sec
 
 // read backend servers' IP addresses and ports from file
 char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
@@ -78,7 +79,7 @@ struct rpc_argv {
         struct timespec time_diff;
         size_t num_bytes_recv;
         double goodput;
-        size_t failed;
+        size_t reconnect;
     } result;
 };
 
@@ -104,13 +105,18 @@ int tcp_connect(size_t exp_num, size_t thread_num, char *ip_addr, char *port) {
 
     if (connect(sktfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1) {
         close(sktfd);
-        fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] connect error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
-        exit(1);
+        sktfd = -1;
+        if (errno == 111) {
+            fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] connect fatal error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+        } else {
+            fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] connect error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+        }
+        goto finish_tcp_connect;
     }
 
-    // set recv timeout to be 5 min
+    // set recv timeout to be 10 sec
     struct timeval tv = (struct timeval) {
-        .tv_sec = 60 * RECV_TIMEOUT,
+        .tv_sec = RECV_TIMEOUT,
         .tv_usec = 0
     };
     setsockopt(sktfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
@@ -118,6 +124,8 @@ int tcp_connect(size_t exp_num, size_t thread_num, char *ip_addr, char *port) {
     char addr[INET6_ADDRSTRLEN];
     inet_ntop(servinfo->ai_family, get_in_addr((struct sockaddr*) servinfo->ai_addr), addr, sizeof(addr));
     printf("[thread %ld] [%s:%s] [Expt %ld] connecting to %s\n", thread_num, ip_addr, port, exp_num, addr);
+
+finish_tcp_connect:
     freeaddrinfo(servinfo);
 
     return sktfd;
@@ -138,7 +146,13 @@ void* virtual_rpc(void *argv) {
     size_t fileSize = ((struct rpc_argv*) argv)->fileSize;
     size_t launchDelay = ((struct rpc_argv*) argv)->launchDelay;
 
+    size_t reconnect = 0;
+    ssize_t num_bytes_recv = 0;
     int sktfd = tcp_connect(exp_num, thread_num, ip_addr, port);
+    if (sktfd == -1) {
+        fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] tcp connect failed\n", thread_num, ip_addr, port, exp_num);
+        exit(1);
+    }
 
     struct rpc_result* res = &((struct rpc_argv*) argv)->result;
     char *recv_buf = (char *) malloc((ADDITIONAL_RECV_BYTES + fileSize) * sizeof(char));
@@ -150,6 +164,23 @@ void* virtual_rpc(void *argv) {
     sleepforus(launchDelay);
 
     struct timespec begin = timespec_now();
+
+reconnect: // when reconnect, adjust delay and fileSize
+    if (sktfd == -1) { // reconnect
+        for (;;) {
+            ++reconnect;
+            sktfd = tcp_connect(exp_num, thread_num, ip_addr, port);
+            if (sktfd == -1) {
+                fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] reconnect %ld failed.\n", thread_num, ip_addr, port, exp_num, reconnect);
+                sleepforus(RECONNECT_INTERVAL * 1000000);
+            } else {
+                break;
+            }
+        }
+        delay = 0;
+        fileSize = ((struct rpc_argv*) argv)->fileSize - num_bytes_recv;
+        printf("[thread %ld] [%s:%s] [Expt %ld] reconnect %ld succeeds; %ld bytes remain.\n", thread_num, ip_addr, port, exp_num, reconnect, fileSize);
+    }
 
     // send msg to backend server
     // char msg[] = "/homes/gws/liangyu/CSE550-HW/HW1/partb/test.txt\n";
@@ -168,48 +199,48 @@ void* virtual_rpc(void *argv) {
     }
 
     // receive reply from backend server
-    ssize_t num_bytes_recv = 0;
     ssize_t last_num_bytes = -1;
-    size_t failed = 0;
     for (;;) {
         ssize_t numbytes;
         if ((numbytes = recv(sktfd, recv_buf, ADDITIONAL_RECV_BYTES + fileSize, 0)) < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                printf("[thread %ld] [%s:%s] [Expt %ld] recv timeout (%d min) triggered: %s (%d); %ld bytes received; Continue recv.\n", 
-                       thread_num, ip_addr, port, exp_num, RECV_TIMEOUT, strerror(errno), errno, num_bytes_recv);
-                if (last_num_bytes > 0) {
-                    char str[256];
-                    size_t begin = 0;
-                    begin += sprintf(&str[begin], "[thread %ld] [%s:%s] [Expt %ld] last recv has %ld bytes: \"", thread_num, ip_addr, port, exp_num, last_num_bytes);
-                    for (size_t i = (10 <= last_num_bytes ? 10 : last_num_bytes); i > 0; --i) {
-                        begin += sprintf(&str[begin], "%02hhx ", recv_buf[last_num_bytes - i]);
-                    }
-                    --begin; // remove the last space
-                    begin += sprintf(&str[begin], "\" (display up to 10 tail bytes)\n");
-                    printf("%s", str);
-                }
+                // printf("[thread %ld] [%s:%s] [Expt %ld] recv timeout (%d sec) triggered: %s (%d); %ld bytes received; Continue recv.\n", 
+                //        thread_num, ip_addr, port, exp_num, RECV_TIMEOUT, strerror(errno), errno, num_bytes_recv);
+                // if (last_num_bytes > 0) {
+                //     char str[256];
+                //     size_t begin = 0;
+                //     begin += sprintf(&str[begin], "[thread %ld] [%s:%s] [Expt %ld] last recv has %ld bytes: \"", thread_num, ip_addr, port, exp_num, last_num_bytes);
+                //     for (size_t i = (10 <= last_num_bytes ? 10 : last_num_bytes); i > 0; --i) {
+                //         begin += sprintf(&str[begin], "%02hhx ", recv_buf[last_num_bytes - i]);
+                //     }
+                //     --begin; // remove the last space
+                //     begin += sprintf(&str[begin], "\" (display up to 10 tail bytes)\n");
+                //     printf("%s", str);
+                // }
 
-                printf("[thread %ld] [%s:%s] [Expt %ld] try test send\n", thread_num, ip_addr, port, exp_num);
+                // printf("[thread %ld] [%s:%s] [Expt %ld] try test send\n", thread_num, ip_addr, port, exp_num);
                 char emptyStr[] = "";
                 ssize_t retval = send(sktfd, emptyStr, sizeof(emptyStr), MSG_DONTWAIT);
-                if (retval < 0) {
-                    printf("[thread %ld] [%s:%s] [Expt %ld] test send: retval = %ld; errno:  %s (%d)\n", 
-                           thread_num, ip_addr, port, exp_num, retval, strerror(errno), errno);
-                } else {
-                    printf("[thread %ld] [%s:%s] [Expt %ld] test send: retval = %ld\n", 
-                           thread_num, ip_addr, port, exp_num, retval);
-                }
+                // if (retval < 0) {
+                //     printf("[thread %ld] [%s:%s] [Expt %ld] test send: retval = %ld; errno:  %s (%d)\n", 
+                //            thread_num, ip_addr, port, exp_num, retval, strerror(errno), errno);
+                // } else {
+                //     printf("[thread %ld] [%s:%s] [Expt %ld] test send: retval = %ld\n", 
+                //            thread_num, ip_addr, port, exp_num, retval);
+                // }
 
                 continue;
             } else {
                 fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] recv error: %s (%d); %ld bytes received.\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno, num_bytes_recv);
-                ++failed;
-                break;
+                close(sktfd);
+                sktfd = -1;
+                goto reconnect;
             }
         } else if (numbytes == 0) {
             fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] Unexpected EOF; %ld bytes received.\n", thread_num, ip_addr, port, exp_num, num_bytes_recv);
-            ++failed;
-            break;
+            close(sktfd);
+            sktfd = -1;
+            goto reconnect;
         } else {
             num_bytes_recv += numbytes;
             last_num_bytes = numbytes;
@@ -237,14 +268,14 @@ void* virtual_rpc(void *argv) {
         "\ttime elapsed: %s\n"
         "\tnum_bytes_recv: %ld\n"
         "\tgoodput: %ldKbps\n"
-        "\tfailed: %ld\n",
-        thread_num, ip_addr, port, exp_num, begin_buf, end_buf, diff_buf, num_bytes_recv, (size_t) round(goodput), failed);
+        "\treconnect: %ld\n",
+        thread_num, ip_addr, port, exp_num, begin_buf, end_buf, diff_buf, num_bytes_recv, (size_t) round(goodput), reconnect);
     res->send_timestamp = begin;
     res->comp_timestamp = end;
     res->time_diff = diff;
     res->num_bytes_recv = num_bytes_recv;
     res->goodput = goodput;
-    res->failed = failed;
+    res->reconnect = reconnect;
 
     size_t finish_count = 0;
     char unfinished[4096];
@@ -308,7 +339,7 @@ int main(int argc, char* argv[]) {
     struct timespec *total_results = (struct timespec*) malloc(numOfExperiments * sizeof(struct timespec));
     struct timespec *indiv_results = (struct timespec*) malloc(serverCount * numOfExperiments * sizeof(struct timespec));
     double total_goodput_over_expts = 0;
-    size_t total_failure_over_expts = 0;
+    size_t overall_max_reconnect = 0;
     for (size_t ex = 0; ex < numOfExperiments; ++ex) {
         if (ex != 0) sleep(10);
 
@@ -368,7 +399,7 @@ int main(int argc, char* argv[]) {
         struct timespec earliest_send = timespec_now();
         struct timespec latest_comp = (struct timespec) {.tv_sec = 0, .tv_nsec = 0};
         size_t total_bytes_recv = 0;
-        size_t total_failure = 0;
+        size_t max_reconnect = 0;
         for (size_t i = 0; i < serverCount; ++i) {
             struct timespec send = thread_argvs[i].result.send_timestamp;
             struct timespec comp = thread_argvs[i].result.comp_timestamp;
@@ -378,14 +409,14 @@ int main(int argc, char* argv[]) {
             earliest_send = timespec_less(send, earliest_send) ? send : earliest_send;
             latest_comp = timespec_less(latest_comp, comp) ? comp : latest_comp;
             total_bytes_recv += thread_argvs[i].result.num_bytes_recv;
-            total_failure += thread_argvs[i].result.failed;
+            max_reconnect = max_reconnect >= thread_argvs[i].result.reconnect ? max_reconnect : thread_argvs[i].result.reconnect;
         }
 
         struct timespec total_diff = timespec_diff(earliest_send, latest_comp);
         total_results[ex] = total_diff;
         double total_goodput = total_bytes_recv * 1.0 / (total_diff.tv_sec * SEC_TO_NS + total_diff.tv_nsec - serverDelay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
         total_goodput_over_expts += total_goodput;
-        total_failure_over_expts += total_failure;
+        overall_max_reconnect = overall_max_reconnect >= max_reconnect ? overall_max_reconnect : max_reconnect;
 
         char begin_buf[64];
         char end_buf[64];
@@ -399,8 +430,8 @@ int main(int argc, char* argv[]) {
             "\ttotal time elapsed: %s\n"
             "\ttotal num of bytes received: %ld\n"
             "\texperiment goodput: %ldKbps\n"
-            "\tfailed rpcs: %ld / %ld\n",
-            ex, begin_buf, end_buf, diff_buf, total_bytes_recv, (size_t) round(total_goodput), total_failure, serverCount);
+            "\tmax reconnect: %ld\n",
+            ex, begin_buf, end_buf, diff_buf, total_bytes_recv, (size_t) round(total_goodput), max_reconnect);
 
         expt_res_log[ex] = (struct rpc_result) {
             .send_timestamp = earliest_send,
@@ -408,7 +439,7 @@ int main(int argc, char* argv[]) {
             .time_diff = total_diff,
             .num_bytes_recv = total_bytes_recv,
             .goodput = total_goodput,
-            .failed = total_failure
+            .reconnect = max_reconnect
         };
         
         free(thread_argvs);
@@ -425,8 +456,8 @@ int main(int argc, char* argv[]) {
            "\tAverage RPC Time Cost: %s\n"
            "\tAverage Individual RPC Time Cost: %s\n"
            "\tAverage Goodput: %ldKbps\n"
-           "\tTotal failed rpcs: %ld / %ld\n",
-        numOfExperiments, total_avg_buf, indiv_avg_buf, avg_goodput, total_failure_over_expts, numOfExperiments * serverCount);
+           "\tMax Reconnect: %ld\n",
+        numOfExperiments, total_avg_buf, indiv_avg_buf, avg_goodput, overall_max_reconnect);
 
     // write results to file named by current time
     struct stat st = {0};
@@ -454,10 +485,10 @@ int main(int argc, char* argv[]) {
         "numOfExperiments\t%ld\n",
         filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments);
     
-    fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s\navg_rpc_goodput\t%ldKbps\ntotal_failed_rpcs\t%ld / %ld\n",
-        total_avg_buf, indiv_avg_buf, avg_goodput, total_failure_over_expts, numOfExperiments * serverCount);
+    fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s\navg_rpc_goodput\t%ldKbps\nmax_reconnect\t%ld\n",
+        total_avg_buf, indiv_avg_buf, avg_goodput, overall_max_reconnect);
 
-    fprintf(fp, "\nexp_num\tearliest_send\tlatest_comp\ttotal_diff\ttotal_bytes_recv\ttotal_goodput\ttotal_failed\n");
+    fprintf(fp, "\nexp_num\tearliest_send\tlatest_comp\ttotal_diff\ttotal_bytes_recv\ttotal_goodput\tmax_reconnect\n");
     for (size_t ex = 0; ex < numOfExperiments; ++ex) {
         struct rpc_result *log = expt_res_log + ex;
 
@@ -469,10 +500,10 @@ int main(int argc, char* argv[]) {
         timespec_print_diff(log->time_diff, diff_buf);
 
         fprintf(fp, "%ld\t%s\t%s\t%s\t%ld\t%ldKbps\t%ld\n",
-            ex, begin_buf, end_buf, diff_buf, log->num_bytes_recv, (size_t) round(log->goodput), log->failed);
+            ex, begin_buf, end_buf, diff_buf, log->num_bytes_recv, (size_t) round(log->goodput), log->reconnect);
     }
 
-    fprintf(fp, "\nexp_num\tthread_num\tip_addr\tport\tdelay\tfileSize\tsend_timestamp\tcomp_timestamp\ttime_diff\tnum_bytes_recv\tgoodput\tfailed\n");
+    fprintf(fp, "\nexp_num\tthread_num\tip_addr\tport\tdelay\tfileSize\tsend_timestamp\tcomp_timestamp\ttime_diff\tnum_bytes_recv\tgoodput\treconnect\n");
     for (size_t i = 0; i < numOfExperiments * serverCount; ++i) {
         struct rpc_argv *log = rpc_argv_log + i;
 
@@ -485,7 +516,7 @@ int main(int argc, char* argv[]) {
 
         fprintf(fp, "%ld\t%ld\t%s\t%s\t%ld\t%ld\t%s\t%s\t%s\t%ld\t%ldKbps\t%ld\n",
             log->exp_num, log->thread_num, log->ip_addr, log->port, log->delay, 
-            log->fileSize, begin_buf, end_buf, diff_buf, log->result.num_bytes_recv, (size_t) round(log->result.goodput), log->result.failed);
+            log->fileSize, begin_buf, end_buf, diff_buf, log->result.num_bytes_recv, (size_t) round(log->result.goodput), log->result.reconnect);
     }
 
     printf("[main] log written to %s\n", logfile);

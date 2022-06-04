@@ -14,7 +14,7 @@
 #include "timespec_util.h"
 
 #define BACKLOG 64
-#define SEND_TIMEOUT 5
+#define SEND_TIMEOUT 10 // sec
 
 void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
@@ -103,6 +103,8 @@ void* handle_connection(void *argv) {
             }
         }
 
+        printf("[thread %ld] msg received: \"%s\"\n", thread_num, recv_buf);
+
         char* delay_str = strtok(recv_buf, " \t\n\0");
         char* fileSize_str = strtok(NULL, " \t\n\0");
         if (delay_str == NULL || fileSize_str == NULL) {
@@ -129,7 +131,7 @@ void* handle_connection(void *argv) {
             ssize_t numbytes;
             if ((numbytes = send(sktfd, send_buf + num_bytes_sent, fileSize - num_bytes_sent, 0)) < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    printf("[thread %ld] send timeout (%d min) triggered: %s (%d); %ld bytes sent; Continue send.\n", thread_num, SEND_TIMEOUT, strerror(errno), errno, num_bytes_sent);
+                    printf("[thread %ld] send timeout (%d sec) triggered: %s (%d); %ld bytes sent; Continue send.\n", thread_num, SEND_TIMEOUT, strerror(errno), errno, num_bytes_sent);
                     if (last_num_bytes > 0) {
                         char str[256];
                         size_t begin = 0;
@@ -206,9 +208,9 @@ int main(int argc, char *argv[]) {
                   sizeof(ip_address));
         printf("[main] got connection from %s\n", ip_address);
 
-        // set send timeout to be 5 min
+        // set send timeout to be 10 sec
         struct timeval tv = (struct timeval) {
-            .tv_sec = 60 * SEND_TIMEOUT,
+            .tv_sec = SEND_TIMEOUT,
             .tv_usec = 0
         };
         setsockopt(sktfd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
