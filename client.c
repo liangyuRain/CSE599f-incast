@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <sys/eventfd.h>
 
 #include "timespec_util.h"
 
@@ -19,6 +20,13 @@
 #define Bps_TO_Kbps (8.0 / 1000.0)
 #define RECV_TIMEOUT 10 // sec
 #define RECONNECT_INTERVAL 1 // sec
+
+#define SIM_CONNECT 50
+
+int efd;
+
+pthread_mutex_t lock;
+pthread_cond_t start_cv;
 
 // read backend servers' IP addresses and ports from file
 char*** read_server_ipAddrPorts(char* filename, size_t serverCount) {
@@ -132,7 +140,7 @@ finish_tcp_connect:
 }
 
 size_t serverCount;
-bool start_flag;
+bool *start_flags;
 bool *ready_flags;
 bool *finish_flags;
 
@@ -159,7 +167,12 @@ void* virtual_rpc(void *argv) {
 
     printf("[thread %ld] [%s:%s] [Expt %ld] tcp connected; thread ready to go\n", thread_num, ip_addr, port, exp_num);
     ready_flags[thread_num] = true;
-    while(!start_flag);
+
+    pthread_mutex_lock(&lock);
+    while (!start_flags[thread_num]) {
+        pthread_cond_wait(&start_cv, &lock);
+    }
+    pthread_mutex_unlock(&lock);
 
     sleepforus(launchDelay);
 
@@ -252,6 +265,11 @@ reconnect: // when reconnect, adjust delay and fileSize
     double goodput = num_bytes_recv * 1.0 / (diff.tv_sec * SEC_TO_NS + diff.tv_nsec - delay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
     finish_flags[thread_num] = true;
 
+    uint64_t tmp = 1;
+    if (write(efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+        fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+    }
+
     free(recv_buf);
 
     // measure completion time
@@ -331,6 +349,13 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    int status = pthread_cond_init(&start_cv, 0);
+    if (status) {
+        fprintf(stderr, "[main] condition variable initilization failed %d\n", status);
+        exit(1);
+    }
+
+    start_flags = (bool*) malloc(serverCount * sizeof(bool));
     ready_flags = (bool*) malloc(serverCount * sizeof(bool));
     finish_flags = (bool*) malloc(serverCount * sizeof(bool));
 
@@ -357,10 +382,10 @@ int main(int argc, char* argv[]) {
             };
         }
 
-        start_flag = false;
         for (size_t i = 0; i < serverCount; ++i) {
             ready_flags[i] = false;
             finish_flags[i] = false;
+            start_flags[i] = false;
         }
 
         // create threads
@@ -381,9 +406,35 @@ int main(int argc, char* argv[]) {
             }
             if (start) break;
         }
-        start_flag = true;
+        
+        size_t active_threads = 0;
+        efd = eventfd(0, 0);
+        if (efd == -1) {
+            fprintf(stderr, "[main] [Expt %ld] get eventfd failed: %s (%d)\n", ex, strerror(errno), errno);
+            exit(1);
+        }
+        for (size_t i = 0; i < serverCount; ++i) {
+            while (active_threads >= SIM_CONNECT) {
+                pthread_mutex_lock(&lock);
+                pthread_cond_broadcast(&start_cv);
+                pthread_mutex_unlock(&lock);
 
-        printf("[main] [Expt %ld] experiment green light\n", ex);
+                uint64_t tmp = 0;
+                if (read(efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+                    fprintf(stderr, "[main] [Expt %ld] read eventfd error: %s (%d)\n", ex, strerror(errno), errno);
+                }
+                active_threads -= tmp;
+            }
+
+            start_flags[i] = true;
+            ++active_threads;
+
+            printf("[main] [Expt %ld] starting thread %ld; num of active threads: %ld\n", ex, i, active_threads);
+        }
+
+        pthread_mutex_lock(&lock);
+        pthread_cond_broadcast(&start_cv);
+        pthread_mutex_unlock(&lock);
 
         // join all threads
         for (size_t i = 0; i < serverCount; ++i) {
@@ -443,6 +494,7 @@ int main(int argc, char* argv[]) {
         };
         
         free(thread_argvs);
+        close(efd);
     }
 
     struct timespec total_avg = timespec_avg(total_results, numOfExperiments);
