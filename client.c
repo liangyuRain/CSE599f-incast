@@ -22,8 +22,12 @@
 #define RECONNECT_INTERVAL 1 // sec
 
 #define SIM_CONNECT 50
+#define SIM_CONNECT_BOUND false
+#define SIM_SIZE 1024 * 1024
+#define SIM_SIZE_BOUND true
 
-int efd;
+int connect_efd;
+int size_efd;
 
 pthread_mutex_t lock;
 pthread_cond_t start_cv;
@@ -255,6 +259,13 @@ reconnect: // when reconnect, adjust delay and fileSize
             sktfd = -1;
             goto reconnect;
         } else {
+            if (SIM_SIZE_BOUND) {
+                uint64_t tmp = numbytes;
+                if (write(size_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+                    fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write size eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+                }
+            }
+
             num_bytes_recv += numbytes;
             last_num_bytes = numbytes;
             if (recv_buf[numbytes - 1] == '\n') break;
@@ -265,9 +276,11 @@ reconnect: // when reconnect, adjust delay and fileSize
     double goodput = num_bytes_recv * 1.0 / (diff.tv_sec * SEC_TO_NS + diff.tv_nsec - delay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
     finish_flags[thread_num] = true;
 
-    uint64_t tmp = 1;
-    if (write(efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
-        fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+    if (SIM_CONNECT_BOUND) {
+        uint64_t tmp = 1;
+        if (write(connect_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+            fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write connect eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+        }
     }
 
     free(recv_buf);
@@ -408,28 +421,55 @@ int main(int argc, char* argv[]) {
         }
         
         size_t active_threads = 0;
-        efd = eventfd(0, 0);
-        if (efd == -1) {
-            fprintf(stderr, "[main] [Expt %ld] get eventfd failed: %s (%d)\n", ex, strerror(errno), errno);
+        size_t active_size = 0;
+        connect_efd = eventfd(0, 0);
+        if (connect_efd == -1) {
+            fprintf(stderr, "[main] [Expt %ld] get connect eventfd failed: %s (%d)\n", ex, strerror(errno), errno);
+            exit(1);
+        }
+        size_efd = eventfd(0, 0);
+        if (size_efd == -1) {
+            fprintf(stderr, "[main] [Expt %ld] get size eventfd failed: %s (%d)\n", ex, strerror(errno), errno);
             exit(1);
         }
         for (size_t i = 0; i < serverCount; ++i) {
-            while (active_threads >= SIM_CONNECT) {
-                pthread_mutex_lock(&lock);
-                pthread_cond_broadcast(&start_cv);
-                pthread_mutex_unlock(&lock);
+            if (SIM_CONNECT_BOUND) {
+                while (active_threads >= SIM_CONNECT) {
+                    pthread_mutex_lock(&lock);
+                    pthread_cond_broadcast(&start_cv);
+                    pthread_mutex_unlock(&lock);
 
-                uint64_t tmp = 0;
-                if (read(efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
-                    fprintf(stderr, "[main] [Expt %ld] read eventfd error: %s (%d)\n", ex, strerror(errno), errno);
+                    uint64_t tmp = 0;
+                    if (read(connect_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+                        fprintf(stderr, "[main] [Expt %ld] read connect eventfd error: %s (%d)\n", ex, strerror(errno), errno);
+                    }
+                    active_threads -= tmp;
                 }
-                active_threads -= tmp;
+            }
+            if (SIM_SIZE_BOUND) {
+                while (active_size >= SIM_SIZE - serverFileSize) {
+                    pthread_mutex_lock(&lock);
+                    pthread_cond_broadcast(&start_cv);
+                    pthread_mutex_unlock(&lock);
+
+                    uint64_t tmp = 0;
+                    if (read(size_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+                        fprintf(stderr, "[main] [Expt %ld] read size eventfd error: %s (%d)\n", ex, strerror(errno), errno);
+                    }
+                    active_size -= tmp;
+                }
             }
 
             start_flags[i] = true;
             ++active_threads;
+            active_size += serverFileSize;
 
-            printf("[main] [Expt %ld] starting thread %ld; num of active threads: %ld\n", ex, i, active_threads);
+            if (SIM_CONNECT_BOUND) {
+                printf("[main] [Expt %ld] starting thread %ld; num of active threads: %ld\n", ex, i, active_threads);
+            }
+            if (SIM_SIZE_BOUND) {
+                printf("[main] [Expt %ld] starting thread %ld; active size: %ld bytes\n", ex, i, active_size);
+            }
         }
 
         pthread_mutex_lock(&lock);
@@ -494,7 +534,8 @@ int main(int argc, char* argv[]) {
         };
         
         free(thread_argvs);
-        close(efd);
+        close(connect_efd);
+        close(size_efd);
     }
 
     struct timespec total_avg = timespec_avg(total_results, numOfExperiments);
