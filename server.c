@@ -82,11 +82,17 @@ void* handle_connection(void *argv) {
 
     char* send_buf = NULL;
 
+    size_t granted_offset = 0;
+    size_t fileSize = -1;
+    ssize_t num_bytes_sent = 0;
+    ssize_t last_num_bytes = -1;
+
+    char recv_buf[256];
+    size_t num_bytes_recv = 0;
     for(;;) {
-        char recv_buf[64];
-        ssize_t num_bytes_recv = 0;
+        char buf[64];
         for(;;) {
-            ssize_t numbytes = recv(sktfd, recv_buf + num_bytes_recv, 64 - num_bytes_recv, 0);
+            ssize_t numbytes = recv(sktfd, recv_buf + num_bytes_recv, 256 - num_bytes_recv, 0);
             if (numbytes == -1) {
                 fprintf(stderr, "[thread %ld] recv error: %s (%d)\n", thread_num, strerror(errno), errno);
                 goto close_fd;
@@ -95,41 +101,51 @@ void* handle_connection(void *argv) {
                 goto close_fd;
             }
             num_bytes_recv += numbytes;
-            recv_buf[num_bytes_recv] = '\0';
-            char *newline_ch = strchr(recv_buf, '\n');
-            if (newline_ch) {
-                *newline_ch = '\0';
+            
+            if (recv_buf[num_bytes_recv - 1] == '\n'){
+                recv_buf[num_bytes_recv - 1] = '\0';
+                char *begin = strrchr(recv_buf, '\n');
+                if (begin == NULL) {
+                    begin = recv_buf;
+                } else {
+                    ++begin;
+                }
+                strcpy(buf, begin);
+                num_bytes_recv = 0;
                 break;
             }
         }
 
-        printf("[thread %ld] msg received: \"%s\"\n", thread_num, recv_buf);
-
-        char* delay_str = strtok(recv_buf, " \t\n\0");
+        char* offset_str = strtok(buf, " \t\n\0");
         char* fileSize_str = strtok(NULL, " \t\n\0");
-        if (delay_str == NULL || fileSize_str == NULL) {
-            fprintf(stderr, "[thread %ld] illegal format \"%s\", expected \"[delay] [fileSize]\"\n", thread_num, recv_buf);
+        if (offset_str == NULL || fileSize_str == NULL) {
+            fprintf(stderr, "[thread %ld] illegal format \"%s\", expected \"[offset] [fileSize]\"\n", thread_num, buf);
             goto close_fd;
         }
         // atol error unhandled
-        size_t delay = atol(delay_str);
-        size_t fileSize = atol(fileSize_str);
-        printf("[thread %ld] request received: delay=%ld, fileSize=%ld\n", thread_num, delay, fileSize);
+        size_t offset = atol(offset_str);
+        if (fileSize == -1) {
+            fileSize = atol(fileSize_str);
 
-        sleepforus(delay);
-
-        send_buf = (char*) malloc(fileSize * sizeof(char));
-        for (size_t i = 0; i < fileSize - 2; ++i) {
-            char c = (char) (i % 251u);
-            if (c == '\n') c = (char) 252u;
-            send_buf[i] = c;
+            send_buf = (char*) malloc(fileSize * sizeof(char));
+            for (size_t i = 0; i < fileSize - 2; ++i) {
+                char c = (char) (i % 251u);
+                if (c == '\n') c = (char) 252u;
+                send_buf[i] = c;
+            }
+            send_buf[fileSize - 1] = '\n';
+        } else if (fileSize != atol(fileSize_str)) {
+            fprintf(stderr, "[thread %ld] fileSize does not match: expected %ld, got \"%s\"\n", thread_num, fileSize, fileSize_str);
+            goto close_fd;
         }
-        send_buf[fileSize - 1] = '\n';
-        ssize_t num_bytes_sent = 0;
-        ssize_t last_num_bytes = -1;
-        while(num_bytes_sent < fileSize) {
+        
+        if (offset > granted_offset) granted_offset = offset;
+        if (granted_offset > fileSize) granted_offset = fileSize;
+        printf("[thread %ld] grant received: offset=%ld, fileSize=%ld, granted_offset=%ld\n", thread_num, offset, fileSize, granted_offset);
+
+        while(num_bytes_sent < granted_offset) {
             ssize_t numbytes;
-            if ((numbytes = send(sktfd, send_buf + num_bytes_sent, fileSize - num_bytes_sent, 0)) < 0) {
+            if ((numbytes = send(sktfd, send_buf + num_bytes_sent, granted_offset - num_bytes_sent, 0)) < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     printf("[thread %ld] send timeout (%d sec) triggered: %s (%d); %ld bytes sent; Continue send.\n", thread_num, SEND_TIMEOUT, strerror(errno), errno, num_bytes_sent);
                     if (last_num_bytes > 0) {
@@ -157,9 +173,7 @@ void* handle_connection(void *argv) {
                 printf("[thread %ld] numbytes = %ld, total %ld bytes sent.\n", thread_num, numbytes, num_bytes_sent);
             }
         }
-        printf("[thread %ld] send finished. %ld bytes sent.\n", thread_num, num_bytes_sent);
-        free(send_buf);
-        send_buf = NULL;
+        printf("[thread %ld] granted send finished. %ld bytes sent.\n", thread_num, num_bytes_sent);
     }
 
 close_fd:

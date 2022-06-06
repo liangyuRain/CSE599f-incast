@@ -20,6 +20,7 @@
 #define Bps_TO_Kbps (8.0 / 1000.0)
 #define RECV_TIMEOUT 10 // sec
 #define RECONNECT_INTERVAL 1 // sec
+#define RTTBytes 1024
 
 size_t maxWinConnect, maxWinSize;
 bool maxWinConnectBound, maxWinSizeBound;
@@ -146,6 +147,55 @@ bool *start_flags;
 bool *ready_flags;
 bool *finish_flags;
 
+struct grant_thread_argv {
+    size_t thread_num;
+    size_t exp_num;
+    char* ip_addr;
+    char* port;
+    size_t fileSize;
+    int bytes_recv_efd;
+    int sktfd;
+};
+
+void* grant_thread_run(void *argv) {
+    size_t thread_num = ((struct grant_thread_argv*) argv)->thread_num;
+    size_t exp_num = ((struct grant_thread_argv*) argv)->exp_num;
+    char* ip_addr = ((struct grant_thread_argv*) argv)->ip_addr;
+    char* port = ((struct grant_thread_argv*) argv)->port;
+    size_t fileSize = ((struct grant_thread_argv*) argv)->fileSize;
+    int bytes_recv_efd = ((struct grant_thread_argv*) argv)->bytes_recv_efd;
+    int sktfd = ((struct grant_thread_argv*) argv)->sktfd;
+
+    size_t offset = RTTBytes;
+    size_t num_bytes_recv = 0;
+
+    for(;;) {
+        char msg[64];
+        sprintf(msg, "%ld %ld\n", offset, fileSize);
+        size_t num_bytes_sent = 0;
+        size_t length = strlen(msg);
+        while(num_bytes_sent < length) {
+            ssize_t numbytes;
+            if ((numbytes = send(sktfd, msg + num_bytes_sent, length - num_bytes_sent, 0)) == -1) {
+                fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] send error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+                exit(1);
+            }
+            num_bytes_sent += numbytes;
+        }
+
+        uint64_t tmp = 0;
+        if (read(bytes_recv_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+            fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] read bytes_recv_efd eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+            return NULL;
+        }
+        num_bytes_recv += tmp;
+
+        if (num_bytes_recv >= fileSize) return NULL;
+        offset = num_bytes_recv + RTTBytes;
+        if (offset > fileSize) offset = fileSize;
+    }
+}
+
 // simulate rpc
 void* virtual_rpc(void *argv) {
     size_t thread_num = ((struct rpc_argv*) argv)->thread_num;
@@ -176,9 +226,11 @@ void* virtual_rpc(void *argv) {
     }
     pthread_mutex_unlock(&lock);
 
-    sleepforus(launchDelay);
-
     struct timespec begin = timespec_now();
+
+    struct grant_thread_argv th_argv;
+
+    int bytes_recv_efd = -1;
 
 reconnect: // when reconnect, adjust delay and fileSize
     if (sktfd == -1) { // reconnect
@@ -197,20 +249,26 @@ reconnect: // when reconnect, adjust delay and fileSize
         printf("[thread %ld] [%s:%s] [Expt %ld] reconnect %ld succeeds; %ld bytes remain.\n", thread_num, ip_addr, port, exp_num, reconnect, fileSize);
     }
 
-    // send msg to backend server
-    // char msg[] = "/homes/gws/liangyu/CSE550-HW/HW1/partb/test.txt\n";
-    char msg[64];
-    sprintf(msg, "%ld %ld\n", delay, fileSize);
-    size_t num_bytes_sent = 0;
-    size_t length = strlen(msg) + 1;
-    msg[length - 1] = EOF;
-    while(num_bytes_sent < length) {
-        ssize_t numbytes;
-        if ((numbytes = send(sktfd, msg + num_bytes_sent, length - num_bytes_sent, 0)) == -1) {
-            fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] send error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
-            exit(1);
-        }
-        num_bytes_sent += numbytes;
+    if (bytes_recv_efd != -1) {
+        close(bytes_recv_efd);
+    }
+    bytes_recv_efd = eventfd(0, 0);
+
+    th_argv = (struct grant_thread_argv) {
+        .thread_num = thread_num,
+        .exp_num = exp_num,
+        .ip_addr = ip_addr,
+        .port = port,
+        .fileSize = fileSize,
+        .bytes_recv_efd = bytes_recv_efd,
+        .sktfd = sktfd
+    };
+
+    int status;
+    pthread_t grant_thread_id;
+    if ((status = pthread_create(&grant_thread_id, NULL, grant_thread_run, &th_argv)) != 0) {
+        fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] grant thread creation failed: %d\n", thread_num, ip_addr, port, exp_num, status);
+        exit(1);
     }
 
     // receive reply from backend server
@@ -261,6 +319,13 @@ reconnect: // when reconnect, adjust delay and fileSize
                 uint64_t tmp = numbytes;
                 if (write(size_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
                     fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write size eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+                }
+            }
+
+            {
+                uint64_t tmp = numbytes;
+                if (write(bytes_recv_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
+                    fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write bytes_recv_efd eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
                 }
             }
 
@@ -352,6 +417,16 @@ int main(int argc, char* argv[]) {
 
     if (maxWinSize > 0 && maxWinSize < serverFileSize) {
         fprintf(stderr, "[main] maxWinSize must be greater than serverFileSize.\n");
+        exit(1);
+    }
+
+    if (serverDelay > 0) {
+        fprintf(stderr, "[main] serverDelay is not supported in Homa version.\n");
+        exit(1);
+    }
+
+    if (launchInterval > 0) {
+        fprintf(stderr, "[main] launchInterval is not supported in Homa version.\n");
         exit(1);
     }
 
@@ -598,8 +673,9 @@ int main(int argc, char* argv[]) {
         "launchInterval(us)\t%ld\n"
         "numOfExperiments\t%ld\n"
         "maxWinConnect\t%ld\n"
-        "maxWinSize\t%ld\n",
-        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments, maxWinConnect, maxWinSize);
+        "maxWinSize\t%ld\n"
+        "RTTBytes\t%d\n",
+        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments, maxWinConnect, maxWinSize, RTTBytes);
     
     fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s\navg_rpc_goodput\t%ldKbps\nmax_reconnect\t%ld\n",
         total_avg_buf, indiv_avg_buf, avg_goodput, overall_max_reconnect);
