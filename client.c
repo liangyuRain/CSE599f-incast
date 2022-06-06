@@ -253,6 +253,10 @@ reconnect: // when reconnect, adjust delay and fileSize
         close(bytes_recv_efd);
     }
     bytes_recv_efd = eventfd(0, 0);
+    if (bytes_recv_efd == -1) {
+        fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] get bytes_recv_efd eventfd failed: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
+        exit(1);
+    }
 
     th_argv = (struct grant_thread_argv) {
         .thread_num = thread_num,
@@ -389,6 +393,7 @@ reconnect: // when reconnect, adjust delay and fileSize
     }
 
     close(sktfd);
+    close(bytes_recv_efd);
 
     return NULL;
 }
