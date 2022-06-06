@@ -16,6 +16,8 @@ SERVER_DELAY=0
 SERVER_FILE_SIZE=1024
 LAUNCH_INTERVAL=0
 NUM_OF_EXPERIMENTS=10
+MAX_WIN_CONNECT=0
+MAX_WIN_SIZE=0
 
 while [[ $# -gt 0 ]]; do
   key="$1"
@@ -45,6 +47,16 @@ while [[ $# -gt 0 ]]; do
       shift
       shift
       ;;
+    --maxWinConnect)
+      MAX_WIN_CONNECT="$2"
+      shift
+      shift
+      ;;
+    --maxWinSize)
+      MAX_WIN_SIZE="$2"
+      shift
+      shift
+      ;;
     *)
       shift
       ;;
@@ -53,4 +65,4 @@ done
 
 echo "Deploying client to ${SSH_HOST}..."
 scp -r [!.]* "${SSH_HOST}:~/"
-ssh -t "${SSH_HOST}" "bash ${RUN_SCRIPT} ${CONFIG} ${SERVER_COUNT} ${SERVER_DELAY} ${SERVER_FILE_SIZE} ${LAUNCH_INTERVAL} ${NUM_OF_EXPERIMENTS}"
+ssh -t "${SSH_HOST}" "bash ${RUN_SCRIPT} ${CONFIG} ${SERVER_COUNT} ${SERVER_DELAY} ${SERVER_FILE_SIZE} ${LAUNCH_INTERVAL} ${NUM_OF_EXPERIMENTS} ${MAX_WIN_CONNECT} ${MAX_WIN_SIZE}"

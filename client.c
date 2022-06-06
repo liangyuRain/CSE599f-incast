@@ -21,10 +21,8 @@
 #define RECV_TIMEOUT 10 // sec
 #define RECONNECT_INTERVAL 1 // sec
 
-#define SIM_CONNECT 50
-#define SIM_CONNECT_BOUND false
-#define SIM_SIZE 1024 * 1024
-#define SIM_SIZE_BOUND true
+size_t maxWinConnect, maxWinSize;
+bool maxWinConnectBound, maxWinSizeBound;
 
 int connect_efd;
 int size_efd;
@@ -259,7 +257,7 @@ reconnect: // when reconnect, adjust delay and fileSize
             sktfd = -1;
             goto reconnect;
         } else {
-            if (SIM_SIZE_BOUND) {
+            if (maxWinSizeBound) {
                 uint64_t tmp = numbytes;
                 if (write(size_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
                     fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write size eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
@@ -276,7 +274,7 @@ reconnect: // when reconnect, adjust delay and fileSize
     double goodput = num_bytes_recv * 1.0 / (diff.tv_sec * SEC_TO_NS + diff.tv_nsec - delay * US_TO_NS) * SEC_TO_NS * Bps_TO_Kbps; // Kbps
     finish_flags[thread_num] = true;
 
-    if (SIM_CONNECT_BOUND) {
+    if (maxWinConnectBound) {
         uint64_t tmp = 1;
         if (write(connect_efd, &tmp, sizeof(uint64_t)) != sizeof(uint64_t)) {
             fprintf(stderr, "[thread %ld] [%s:%s] [Expt %ld] write connect eventfd error: %s (%d)\n", thread_num, ip_addr, port, exp_num, strerror(errno), errno);
@@ -331,9 +329,10 @@ reconnect: // when reconnect, adjust delay and fileSize
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 7) {
+    if (argc != 9) {
         fprintf(stderr, "usage: client [hostname file] [server count] [server delay (us)] " 
-                        "[server file size (byte)] [rpc launch interval (us)] [num of experiments]\n");
+                        "[server file size (byte)] [rpc launch interval (us)] [num of experiments] "
+                        "[max num of connections in a window] [max total size of connections in a window]\n");
         exit(1);
     }
 
@@ -343,6 +342,26 @@ int main(int argc, char* argv[]) {
     size_t serverFileSize = atol(argv[4]);
     size_t launchInterval = atol(argv[5]);
     size_t numOfExperiments = atol(argv[6]);
+    size_t maxWinConnect = atol(argv[7]);
+    size_t maxWinSize = atol(argv[8]);
+
+    if (maxWinConnect > 0 && maxWinSize > 0) {
+        fprintf(stderr, "[main] cannot specify maxWinConnect and maxWinSize at the same time (at least one of them is non-positive).\n");
+        exit(1);
+    }
+
+    if (maxWinSize > 0 && maxWinSize < serverFileSize) {
+        fprintf(stderr, "[main] maxWinSize must be greater than serverFileSize.\n");
+        exit(1);
+    }
+
+    maxWinConnectBound = false;
+    maxWinSizeBound = false;
+    if (maxWinConnect > 0) {
+        maxWinConnectBound = true;
+    } else if (maxWinSize > 0) {
+        maxWinSizeBound = true;
+    }
 
     printf("[main] parameters:\n"
         "\tfilename: %s\n"
@@ -350,8 +369,10 @@ int main(int argc, char* argv[]) {
         "\tserverDelay(us): %ld\n"
         "\tserverFileSize(byte): %ld\n"
         "\tlaunchInterval(us): %ld\n"
-        "\tnumOfExperiments: %ld\n",
-        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments);
+        "\tnumOfExperiments: %ld\n"
+        "\tmaxWinConnect: %ld\n"
+        "\tmaxWinSize: %ld\n",
+        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments, maxWinConnect, maxWinSize);
     
     // count number of valid server hostnames
     char*** ipAddrPorts = read_server_ipAddrPorts(filename, serverCount);
@@ -433,8 +454,8 @@ int main(int argc, char* argv[]) {
             exit(1);
         }
         for (size_t i = 0; i < serverCount; ++i) {
-            if (SIM_CONNECT_BOUND) {
-                while (active_threads >= SIM_CONNECT) {
+            if (maxWinConnectBound) {
+                while (active_threads >= maxWinConnect) {
                     pthread_mutex_lock(&lock);
                     pthread_cond_broadcast(&start_cv);
                     pthread_mutex_unlock(&lock);
@@ -446,8 +467,8 @@ int main(int argc, char* argv[]) {
                     active_threads -= tmp;
                 }
             }
-            if (SIM_SIZE_BOUND) {
-                while (active_size >= SIM_SIZE - serverFileSize) {
+            if (maxWinSizeBound) {
+                while (active_size > maxWinSize - serverFileSize) {
                     pthread_mutex_lock(&lock);
                     pthread_cond_broadcast(&start_cv);
                     pthread_mutex_unlock(&lock);
@@ -464,10 +485,10 @@ int main(int argc, char* argv[]) {
             ++active_threads;
             active_size += serverFileSize;
 
-            if (SIM_CONNECT_BOUND) {
+            if (maxWinConnectBound) {
                 printf("[main] [Expt %ld] starting thread %ld; num of active threads: %ld\n", ex, i, active_threads);
             }
-            if (SIM_SIZE_BOUND) {
+            if (maxWinSizeBound) {
                 printf("[main] [Expt %ld] starting thread %ld; active size: %ld bytes\n", ex, i, active_size);
             }
         }
@@ -575,8 +596,10 @@ int main(int argc, char* argv[]) {
         "serverDelay(us)\t%ld\n"
         "serverFileSize(byte)\t%ld\n"
         "launchInterval(us)\t%ld\n"
-        "numOfExperiments\t%ld\n",
-        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments);
+        "numOfExperiments\t%ld\n"
+        "maxWinConnect\t%ld\n"
+        "maxWinSize\t%ld\n",
+        filename, serverCount, serverDelay, serverFileSize, launchInterval, numOfExperiments, maxWinConnect, maxWinSize);
     
     fprintf(fp, "\ntotal_rpc_avg\t%s\nindiv_rpc_avg\t%s\navg_rpc_goodput\t%ldKbps\nmax_reconnect\t%ld\n",
         total_avg_buf, indiv_avg_buf, avg_goodput, overall_max_reconnect);
