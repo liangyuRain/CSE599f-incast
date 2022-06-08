@@ -116,7 +116,15 @@ void* handle_connection(void *argv) {
         size_t fileSize = atol(fileSize_str);
         printf("[thread %ld] request received: delay=%ld, fileSize=%ld\n", thread_num, delay, fileSize);
 
-        sleepforus(delay);
+        if (delay > 0) {
+            struct timespec sleep_begin = timespec_now();
+            sleepforus(delay);
+            struct timespec sleep_end = timespec_now();
+            struct timespec sleep_diff = timespec_diff(sleep_begin, sleep_end);
+            char sleep_diff_buf[64];
+            timespec_print_diff(sleep_diff, sleep_diff_buf);
+            printf("[thread %ld] server slept for %s, expected %ld us.\n", thread_num, sleep_diff_buf, delay);
+        }
 
         send_buf = (char*) malloc(fileSize * sizeof(char));
         for (size_t i = 0; i < fileSize - 2; ++i) {
